@@ -1,0 +1,43 @@
+name: Protocol Sync Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'orchestrator/app/models/protocol.py'
+      - 'orvix-node/orvix_node/protocol.py'
+
+jobs:
+  check-protocol-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare protocol files (below header)
+        run: |
+          ORCH_FILE=orchestrator/app/models/protocol.py
+          NODE_FILE=orvix-node/orvix_node/protocol.py
+
+          if [[ ! -f "$ORCH_FILE" ]]; then
+            echo "Orchestrator protocol file not found: $ORCH_FILE"
+            exit 1
+          fi
+          if [[ ! -f "$NODE_FILE" ]]; then
+            echo "Node protocol file not found: $NODE_FILE"
+            exit 1
+          fi
+
+          # Strip the first 10 lines (header) and compare the body.
+          tail -n +11 "$ORCH_FILE" > /tmp/orch_body.py
+          tail -n +11 "$NODE_FILE" > /tmp/node_body.py
+
+          if ! diff -q /tmp/orch_body.py /tmp/node_body.py > /dev/null; then
+            echo "ERROR: Protocol files are out of sync!"
+            echo "The body (below header) of protocol.py must be identical in both packages."
+            echo ""
+            diff /tmp/orch_body.py /tmp/node_body.py
+            exit 1
+          fi
+
+          echo "Protocol files are in sync"

@@ -1,0 +1,100 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      orchestrator: ${{ steps.filter.outputs.orchestrator }}
+      node: ${{ steps.filter.outputs.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            orchestrator:
+              - 'orchestrator/**'
+              - '.github/workflows/test.yml'
+            node:
+              - 'orvix-node/**'
+              - '.github/workflows/test.yml'
+
+  test-orchestrator:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.orchestrator == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    defaults:
+      run:
+        working-directory: orchestrator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: orchestrator/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+      - name: Lint with ruff
+        run: ruff check .
+      - name: Run tests
+        run: pytest -v --cov=app --cov-report=term-missing
+        env:
+          SUPABASE_URL: http://fake.supabase.test
+          SUPABASE_SERVICE_KEY: fake_key
+          JWT_SECRET: test_secret_for_ci_only_not_for_production
+          ENVIRONMENT: dev
+
+  test-node:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    defaults:
+      run:
+        working-directory: orvix-node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: orvix-node/pyproject.toml
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-cov ruff
+      - name: Lint with ruff
+        run: ruff check .
+      - name: Run tests
+        run: pytest -v --cov=orvix_node --cov-report=term-missing
+        env:
+          ORVIX_NODE_STUB_GPU: 'true'
+
+  all-tests-pass:
+    if: always()
+    needs: [test-orchestrator, test-node]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all tests passed
+        run: |
+          if [[ "${{ needs.test-orchestrator.result }}" == "failure" || "${{ needs.test-node.result }}" == "failure" ]]; then
+            echo "One or more test jobs failed"
+            exit 1
+          fi
+          echo "All tests passed (or were skipped because no relevant changes)"

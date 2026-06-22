@@ -1,0 +1,29 @@
+name: Migration Order Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'orchestrator/migrations/*.sql'
+
+jobs:
+  check-migration-order:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify migrations are sequentially numbered
+        run: |
+          cd orchestrator/migrations
+          files=$(ls *.sql | sort)
+          expected=1
+          for f in $files; do
+            num=$(echo "$f" | grep -oP '^\d+')
+            if [[ "$num" != "$(printf "%03d" $expected)" ]]; then
+              echo "ERROR: Migration $f doesn't match expected sequence (expected ${expected})"
+              exit 1
+            fi
+            expected=$((expected + 1))
+          done
+          echo "Migrations are sequentially numbered"
