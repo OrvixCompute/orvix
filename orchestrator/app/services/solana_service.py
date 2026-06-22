@@ -5,7 +5,6 @@ from typing import Any, Optional
 import httpx
 
 from app.config import settings
-from app.logger import logger
 
 # SPL Memo program (v2). Memo instructions are parsed under this program id.
 MEMO_PROGRAM_IDS = {

@@ -71,7 +71,7 @@ def test_daily_limit_enforced(db, svc, monkeypatch):
 async def test_stub_processing_completes(db, svc, monkeypatch):
     monkeypatch.setattr(payout_mod.settings, "PAYOUT_STUB", True)
     user = db.add_user(available_usdc=0.0, pending_withdrawal_usdc=200.0)
-    w = db._table("withdrawals").insert_row(
+    db._table("withdrawals").insert_row(
         {
             "user_id": user["id"],
             "amount": 200.0,

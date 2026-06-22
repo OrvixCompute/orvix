@@ -73,31 +73,40 @@ class _Query:
         return self
 
     def eq(self, c, v):
-        self._filters.append((c, "eq", v)); return self
+        self._filters.append((c, "eq", v))
+        return self
 
     def neq(self, c, v):
-        self._filters.append((c, "neq", v)); return self
+        self._filters.append((c, "neq", v))
+        return self
 
     def gt(self, c, v):
-        self._filters.append((c, "gt", v)); return self
+        self._filters.append((c, "gt", v))
+        return self
 
     def gte(self, c, v):
-        self._filters.append((c, "gte", v)); return self
+        self._filters.append((c, "gte", v))
+        return self
 
     def in_(self, c, values):
-        self._filters.append((c, "in", list(values))); return self
+        self._filters.append((c, "in", list(values)))
+        return self
 
     def contains(self, c, value):
-        self._filters.append((c, "contains", value)); return self
+        self._filters.append((c, "contains", value))
+        return self
 
     def order(self, c, desc=False):
-        self._order, self._desc = c, desc; return self
+        self._order, self._desc = c, desc
+        return self
 
     def limit(self, n):
-        self._limit = n; return self
+        self._limit = n
+        return self
 
     def range(self, a, b):
-        self._range = (a, b); return self
+        self._range = (a, b)
+        return self
 
     # execution -------------------------------------------------------------
     def _match(self, row) -> bool:
@@ -251,7 +260,6 @@ class FakeSupabase:
             "wallet_address": "wallet" + uuid.uuid4().hex[:8],
             "tier": "bronze",
             "balance_usdc": 1000.0,
-            "balance_usdc": 0.0,
             "is_active": True,
         }
         defaults.update(fields)

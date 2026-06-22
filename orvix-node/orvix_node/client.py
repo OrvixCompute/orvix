@@ -20,9 +20,7 @@ from orvix_node.protocol import (
     GPUInfo,
     HeartbeatMessage,
     JobMessage,
-    PingMessage,
     RegisterMessage,
-    ShutdownMessage,
     parse_message,
     serialize,
 )

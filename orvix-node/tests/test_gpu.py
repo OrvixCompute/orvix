@@ -65,16 +65,21 @@ def test_mocked_pynvml_detection(fresh_gpu, monkeypatch):
         def nvmlDeviceGetHandleByIndex(self, i): return object()
         def nvmlDeviceGetName(self, h): return "RTX 2000 Ada"
         def nvmlDeviceGetMemoryInfo(self, h):
-            class M: total = 16 * 1024 * 1024 * 1024; used = 4 * 1024 * 1024 * 1024
+            class M:
+                total = 16 * 1024 * 1024 * 1024
+                used = 4 * 1024 * 1024 * 1024
             return M()
         def nvmlSystemGetCudaDriverVersion_v2(self): return 12040
         def nvmlDeviceGetCudaComputeCapability(self, h): return (8, 9)
         def nvmlDeviceGetPciInfo(self, h):
-            class P: busId = b"0000:01:00.0"
+            class P:
+                busId = b"0000:01:00.0"
             return P()
         def nvmlSystemGetDriverVersion(self): return b"550.00"
         def nvmlDeviceGetUtilizationRates(self, h):
-            class U: gpu = 42; memory = 25
+            class U:
+                gpu = 42
+                memory = 25
             return U()
         def nvmlDeviceGetTemperature(self, h, s): return 55
         def nvmlDeviceGetPowerUsage(self, h): return 120000
