@@ -1,0 +1,22 @@
+# Example Orvix Node configuration.
+# Copy to ~/.orvix/config.yaml (Linux/Mac) or %APPDATA%/orvix/config.yaml (Windows),
+# or run `orvix-node config init` to generate it.
+
+# --- Required ---
+provider_id: "your-provider-id"     # from POST /v1/provider/register
+node_secret: "your-node-secret"     # keep private
+
+# --- Connection ---
+orchestrator_url: "wss://api.orvix.xyz"   # local dev: ws://localhost:8000
+model: "qwen-2.5-7b"
+
+# --- Runtime ---
+heartbeat_interval: 15
+health_port: 9000
+max_concurrent_jobs: 4
+backend: "mock"            # "mock" or "vllm"
+
+# --- Logging ---
+log_level: "INFO"
+json_logs: false
+# log_file: ""             # default: ~/.orvix/logs/node.log

@@ -1,0 +1,33 @@
+# Versions verified on Python 3.14 (Windows). These all ship prebuilt wheels,
+# so no Rust/C++ build toolchain is required. On Python 3.11 these resolve fine
+# too; if you must use the originally-specced older pins, do so on 3.11 only.
+
+# --- Web framework ---
+fastapi==0.138.0
+uvicorn[standard]==0.49.0
+
+# --- Config & validation ---
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2
+
+# --- Database ---
+supabase==2.31.0
+
+# --- Logging ---
+loguru==0.7.3
+
+# --- Auth (Prompt 3) ---
+python-jose[cryptography]==3.5.0
+solders==0.27.1
+base58==2.1.1
+
+# --- Inference / billing (Prompt 5) ---
+tiktoken==0.13.0
+
+# --- Solana payment listener (Prompt 6) ---
+httpx==0.28.1
+
+# --- Tests ---
+pytest==9.1.1
+pytest-asyncio==1.4.0
