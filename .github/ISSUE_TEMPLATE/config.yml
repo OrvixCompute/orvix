@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / Discussion
+    url: https://github.com/OrvixCompute/orvix/discussions
+    about: Ask questions or discuss ideas in GitHub Discussions
+  - name: Security Vulnerability
+    url: https://github.com/OrvixCompute/orvix/security/advisories/new
+    about: Report security issues privately (see SECURITY.md)
+  - name: Discord Community
+    url: https://discord.gg/orvix
+    about: Chat with the community (replace with actual invite when ready)
