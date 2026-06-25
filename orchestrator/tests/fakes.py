@@ -4,6 +4,7 @@ Supports just enough of the postgrest query builder + rpc() for the services and
 routes under test — no network, no real database required.
 """
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -261,6 +262,9 @@ class FakeSupabase:
             "tier": "bronze",
             "balance_usdc": 1000.0,
             "is_active": True,
+            "is_provider": True,
+            # sha256("secret") — matches the node_secret used across node tests.
+            "provider_secret_hash": hashlib.sha256(b"secret").hexdigest(),
         }
         defaults.update(fields)
         return self._table("users").insert_row(defaults)

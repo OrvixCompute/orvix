@@ -49,10 +49,15 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 def register_middleware(app: FastAPI) -> None:
     """Register all middleware. CORS is added last so it runs outermost."""
     app.add_middleware(RequestLoggingMiddleware)
+    origins = settings.cors_origins_list
+    # Credentials cannot be combined with a wildcard origin: browsers reject the
+    # response, and doing so would expose credentialed endpoints to any site.
+    # Only allow credentials when an explicit origin allowlist is configured.
+    allow_credentials = origins != ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["X-Request-ID", "X-Orvix-Tier", "X-Orvix-Cost"],

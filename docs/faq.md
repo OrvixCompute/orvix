@@ -3,7 +3,7 @@
 ## General
 
 **What is Orvix?**
-Orvix is a decentralized GPU inference network on Solana. It lets developers access AI inference through an OpenAI-compatible API, paid for in ORVX, while letting GPU owners earn by serving requests.
+Orvix is a decentralized GPU inference network on Solana. It lets developers access AI inference through an OpenAI-compatible API, paid for in USDC, while letting GPU owners earn USDC by serving requests.
 
 **How is Orvix different from OpenAI?**
 Orvix routes requests to a distributed network of GPU providers rather than centralized servers. This means lower cost, no vendor lock-in, and earning opportunities for hardware owners.
@@ -39,7 +39,7 @@ Earnings accumulate in your account. You can withdraw to your Solana wallet anyt
 ORVX is launched on pump.fun. Check the official Twitter/Discord for the verified token mint address. Never trust unverified sources.
 
 **Is ORVX a security?**
-Orvix is a utility token used for paying for compute, staking nodes, and governance participation. Nothing in our docs constitutes investment advice or guarantees of returns.
+ORVX is a utility token used for pricing-tier discounts, staking nodes, and governance participation — compute itself is paid for in USDC. Nothing in our docs constitutes investment advice or guarantees of returns.
 
 ## Project
 

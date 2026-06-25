@@ -77,6 +77,41 @@ async def test_register_unknown_provider_raises(monkeypatch):
         await mgr.register_node(FakeWS(), msg)
 
 
+async def test_register_invalid_secret_raises(monkeypatch):
+    db = FakeSupabase()
+    user = db.add_user()  # provider_secret_hash defaults to sha256("secret")
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+    msg = RegisterMessage(
+        provider_id=user["id"],
+        node_secret="wrong-secret",
+        version="0.1.0",
+        gpu_info=GPUInfo(model="RTX 4090", vram_total_mb=24576),
+        models_supported=["qwen-2.5-7b"],
+        max_concurrent_jobs=1,
+    )
+    with pytest.raises(ValueError):
+        await mgr.register_node(FakeWS(), msg)
+    assert not mgr.connected_nodes
+
+
+async def test_register_no_secret_set_raises(monkeypatch):
+    db = FakeSupabase()
+    user = db.add_user(provider_secret_hash=None, is_provider=False)
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+    msg = RegisterMessage(
+        provider_id=user["id"],
+        node_secret="secret",
+        version="0.1.0",
+        gpu_info=GPUInfo(model="RTX 4090", vram_total_mb=24576),
+        models_supported=["qwen-2.5-7b"],
+        max_concurrent_jobs=1,
+    )
+    with pytest.raises(ValueError):
+        await mgr.register_node(FakeWS(), msg)
+
+
 def test_select_single_and_no_match():
     mgr = NodeManager()
     c = _conn("n1")

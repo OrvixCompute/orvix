@@ -9,6 +9,8 @@ Futures (non-streaming) or Queues (streaming).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -80,15 +82,26 @@ class NodeManager:
 
         # Validate the provider exists.
         user = (
-            db.table("users").select("id").eq("id", msg.provider_id).limit(1).execute()
+            db.table("users")
+            .select("id, provider_secret_hash")
+            .eq("id", msg.provider_id)
+            .limit(1)
+            .execute()
         )
         if not user.data:
             raise ValueError("Unknown provider_id")
 
-        # TODO: validate node_secret against users.provider_secret_hash. For now
-        # we only require a non-empty secret.
+        # Authenticate the node against the provider's stored secret. The plaintext
+        # secret is issued once by POST /v1/provider/register and persisted only as
+        # a sha256 hex digest (see routes/provider.py). Compare in constant time.
         if not msg.node_secret:
             raise ValueError("Missing node_secret")
+        stored_hash = user.data[0].get("provider_secret_hash")
+        if not stored_hash:
+            raise ValueError("Provider has no node secret set; register as a provider first")
+        provided_hash = hashlib.sha256(msg.node_secret.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(provided_hash, stored_hash):
+            raise ValueError("Invalid node_secret")
 
         node_id = str(uuid.uuid4())
         conn = NodeConnection(

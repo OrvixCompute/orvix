@@ -15,11 +15,18 @@ ORVX is the utility token that powers the Orvix network.
 > Always verify the official token mint address via the project's verified
 > Twitter / Discord. Never trust unverified sources.
 
+> 💵 **Payments are settled in USDC, not ORVX.** Developers fund their balance
+> and pay for inference in USDC, and providers are paid out in USDC. ORVX is the
+> network's *utility* token — it powers discounts, staking, and governance
+> (below), not the unit of account for compute.
+
 ## Utility
 
-### Compute payments
-ORVX is used to pay for inference. Billing logic is in place today; real on-chain
-settlement is being finalized alongside live inference.
+### Compute payment discounts
+Inference is billed and settled in **USDC**. Holding ORVX unlocks tiered pricing
+discounts (see the tiers below) — the more you hold, the lower your per-token
+cost. Billing logic is in place today; real on-chain settlement is being
+finalized alongside live inference.
 
 ### Node staking
 Providers stake to run nodes. Staking is **off-chain in v1**, moving **on-chain

@@ -68,6 +68,19 @@ def test_register_rejected_unknown_provider(ctx):
         assert "provider" in (ack.reason or "").lower()
 
 
+def test_register_rejected_invalid_secret(ctx):
+    db, user = ctx
+    client = TestClient(app)
+    msg = _register_msg(user["id"])
+    msg.node_secret = "wrong-secret"
+    with client.websocket_connect("/v1/node/connect") as ws:
+        ws.send_text(serialize(msg))
+        ack = parse_message(ws.receive_text())
+        assert ack.type == "register_ack"
+        assert ack.accepted is False
+        assert "secret" in (ack.reason or "").lower()
+
+
 def test_first_message_must_be_register(ctx):
     db, user = ctx
     client = TestClient(app)
