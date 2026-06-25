@@ -1,12 +1,15 @@
-<!-- Add the actual logo at .github/assets/logo.png -->
-![Orvix](.github/assets/logo.png)
+<!-- Placeholder logo at .github/assets/logo.svg — swap with the final design when ready -->
+<p align="center">
+  <img src=".github/assets/logo.svg" alt="Orvix" width="400">
+</p>
 
 # Orvix
 
 > Decentralized GPU inference network on Solana. Powering intelligence at scale.
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Build](https://img.shields.io/badge/build-pending-lightgrey.svg)](https://github.com/OrvixCompute/orvix/actions)
+[![Tests](https://github.com/OrvixCompute/orvix/actions/workflows/test.yml/badge.svg)](https://github.com/OrvixCompute/orvix/actions/workflows/test.yml)
+[![Protocol Sync](https://github.com/OrvixCompute/orvix/actions/workflows/protocol-sync.yml/badge.svg)](https://github.com/OrvixCompute/orvix/actions/workflows/protocol-sync.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Twitter](https://img.shields.io/badge/Twitter-%40OrvixCompute-1DA1F2.svg)](https://twitter.com/OrvixCompute)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2.svg)](https://discord.gg/orvix)
