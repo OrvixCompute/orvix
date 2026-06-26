@@ -13,17 +13,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify migrations are sequentially numbered
+      - name: Verify migration filenames, ordering, and uniqueness
         run: |
           cd orchestrator/migrations
           files=$(ls *.sql | sort)
           expected=1
+          seen=""
           for f in $files; do
+            # 1. Naming convention: NNN_name.sql
+            if [[ ! "$f" =~ ^[0-9]{3}_[a-z0-9_]+\.sql$ ]]; then
+              echo "ERROR: $f does not match the NNN_name.sql convention"
+              exit 1
+            fi
             num=$(echo "$f" | grep -oP '^\d+')
+            # 2. No duplicate version numbers
+            if [[ " $seen " == *" $num "* ]]; then
+              echo "ERROR: duplicate migration version $num ($f)"
+              exit 1
+            fi
+            seen="$seen $num"
+            # 3. Sequential, no gaps
             if [[ "$num" != "$(printf "%03d" $expected)" ]]; then
               echo "ERROR: Migration $f doesn't match expected sequence (expected ${expected})"
               exit 1
             fi
             expected=$((expected + 1))
           done
-          echo "Migrations are sequentially numbered"
+          echo "Migrations OK: named, sequential, unique"
