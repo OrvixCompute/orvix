@@ -95,6 +95,11 @@ def _record_job(
         }
     ).execute()
 
+    # Mock jobs (no real node served them) are not billable revenue, so they must
+    # not feed the buyback/treasury/operations accounting. Only split real jobs.
+    if is_mock:
+        return
+
     # Split the platform fee (cost - provider share) 50/30/20 into the buyback
     # budget / treasury / operations buckets. Best-effort: the response is already
     # computed, so a bookkeeping failure must not fail the request.

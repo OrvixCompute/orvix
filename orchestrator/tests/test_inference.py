@@ -123,8 +123,8 @@ def test_tier_header_bronze_when_unstaked(client_and_db):
     assert resp.headers["X-Orvix-Tier"] == "bronze"
 
 
-def test_job_accrues_buyback_budget(client_and_db):
-    """A completed job splits its platform fee into the buyback budget."""
+def test_mock_job_does_not_accrue_budget(client_and_db):
+    """Mock-served jobs aren't billable revenue, so they must not touch accounting."""
     client, db = client_and_db
     _make_user(db)
     resp = client.post(
@@ -137,11 +137,40 @@ def test_job_accrues_buyback_budget(client_and_db):
         },
     )
     assert resp.status_code == 200
+    # The job was recorded as a mock...
+    assert db._table("jobs").rows[0]["is_mock"] is True
+    # ...and no revenue split ran, so no global_accounting row was created/touched.
+    acct = [r for r in db._table("global_accounting").rows if r.get("id") == 1]
+    assert acct == [] or float(acct[0]["buyback_budget_usdc"]) == 0
+
+
+def test_record_job_real_accrues_budget_but_mock_does_not():
+    """_record_job splits the fee only for real jobs (is_mock=False)."""
+    from app.routes import inference as inference_route
+
+    # Real job -> accounting accrues.
+    db = FakeSupabase()
+    inference_route._record_job(
+        db, user_id="u1", api_key_id="k1", node_id="node-1", model="qwen-2.5-7b",
+        prompt_tokens=1000, completion_tokens=1000, cost=Decimal("1.0"),
+        latency_ms=5, is_mock=False,
+    )
     acct = next(r for r in db._table("global_accounting").rows if r["id"] == 1)
-    # Platform fee = 30% of cost; buyback gets 50% of that. Both > 0.
-    assert float(acct["buyback_budget_usdc"]) > 0
-    assert float(acct["treasury_balance_usdc"]) > 0
-    assert float(acct["operations_balance_usdc"]) > 0
+    # Platform fee = cost - 70% provider = 0.30; buyback = 50% of fee = 0.15.
+    assert float(acct["buyback_budget_usdc"]) == pytest.approx(0.15)
+    assert float(acct["treasury_balance_usdc"]) == pytest.approx(0.09)
+    assert float(acct["operations_balance_usdc"]) == pytest.approx(0.06)
+
+    # Mock job -> no accounting row created at all.
+    db2 = FakeSupabase()
+    inference_route._record_job(
+        db2, user_id="u1", api_key_id="k1", node_id=None, model="qwen-2.5-7b",
+        prompt_tokens=1000, completion_tokens=1000, cost=Decimal("1.0"),
+        latency_ms=5, is_mock=True,
+    )
+    assert len(db2._table("jobs").rows) == 1
+    assert db2._table("jobs").rows[0]["is_mock"] is True
+    assert [r for r in db2._table("global_accounting").rows if r.get("id") == 1] == []
 
 
 def test_streaming_emits_done(client_and_db):
