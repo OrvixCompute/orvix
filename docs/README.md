@@ -10,6 +10,7 @@ This folder contains additional documentation for the Orvix project beyond the t
 - [Tokenomics](./tokenomics.md) — ORVX token economy, tiers, buyback & burn
 - [Governance](./governance/README.md) — Snapshot voting, proposal templates
 - [Burn Procedure](./burn-procedure.md) — monthly burn runbook
+- [Operations](./operations.md) — runbook + code-synchronization discipline
 - [FAQ](./faq.md) — frequently asked questions
 
 For high-level architecture, see [ARCHITECTURE.md](../ARCHITECTURE.md) at the repo root.
