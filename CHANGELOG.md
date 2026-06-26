@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (entries here as work progresses)
 
-## [0.2.0] — Unreleased — Whitepaper Alignment
+## [0.2.0] — 2026-06-26 — Whitepaper Alignment
 
 ### Added
 - Provider staking: 25,000 ORVX minimum required to register as a compute provider
@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Tier is now derived from `staked_orvx` (kept in sync by a DB trigger), not wallet balance
-- Provider registration enforces the minimum stake
+- Provider registration enforces the minimum stake when `REQUIRE_STAKE_FOR_PROVIDER` is enabled (default off during alpha)
 - Inference billing applies the stake-based tier discount
 - `RequestValidationError` responses are now JSON-safe when error context contains Decimals
 
