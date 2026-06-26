@@ -5,6 +5,7 @@ jobs, auto-reconnect with exponential backoff.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
@@ -86,9 +87,20 @@ class OrchestratorClient:
         if scheme == "ws":
             if host in ("localhost", "127.0.0.1"):
                 logger.warning("DEV MODE: using insecure ws:// to {} (localhost only)", host)
+            elif os.environ.get("ORVIX_NODE_ALLOW_INSECURE_WS", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                logger.warning(
+                    "INSECURE: using ws:// to non-local host '{}' "
+                    "(ORVIX_NODE_ALLOW_INSECURE_WS set). Use wss:// in production.",
+                    host,
+                )
             else:
                 raise AuthError(
-                    f"Refusing insecure ws:// to non-local host '{host}'. Use wss://."
+                    f"Refusing insecure ws:// to non-local host '{host}'. Use wss://, "
+                    "or set ORVIX_NODE_ALLOW_INSECURE_WS=true to override (dev only)."
                 )
 
     async def start(self) -> None:
@@ -122,7 +134,12 @@ class OrchestratorClient:
     async def _run_once(self) -> None:
         url = self._connect_url()
         logger.info("Connecting to {}", url)
-        async with websockets.connect(url, max_size=8 * 1024 * 1024) as ws:
+        # ping_interval=None: rely on the app-level heartbeat (sent every
+        # heartbeat_interval s) for liveness instead of WS keepalive pings, which
+        # were dropping the connection over higher-latency links (1011 timeouts).
+        async with websockets.connect(
+            url, max_size=8 * 1024 * 1024, ping_interval=None
+        ) as ws:
             self._ws = ws
             await self._register(ws)
 
