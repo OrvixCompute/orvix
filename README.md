@@ -94,17 +94,23 @@ orvix-node start
 
 ## 📍 Project status
 
-**Active development — backend MVP complete, public testnet incoming.**
+**Active development — backend MVP + tokenomics complete, public testnet incoming.**
 
 Both packages are built and unit-tested, with a cross-process end-to-end flow verified
-(node ↔ orchestrator over WebSocket). Real GPU inference (vLLM) and a public deployment are
-the next milestones. See [CHANGELOG.md](CHANGELOG.md) for details.
+(node ↔ orchestrator over WebSocket). The ORVX utility model is implemented: provider
+staking (25k ORVX minimum), stake-based pricing tiers, a 70/30 revenue split feeding a
+50/30/20 buyback/treasury/operations flow, manual buyback (Jupiter) and monthly burn
+tooling, and Snapshot-based governance. On-chain buyback/burn execution is stub-gated
+pending devnet testing. Real GPU inference (vLLM) and a public deployment are the next
+milestones. See [CHANGELOG.md](CHANGELOG.md) and [docs/tokenomics.md](docs/tokenomics.md).
 
 ## 📖 Documentation
 
 - [orchestrator/README.md](orchestrator/README.md) — backend setup and API
 - [orvix-node/README.md](orvix-node/README.md) — running a node
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design deep-dive
+- [docs/tokenomics.md](docs/tokenomics.md) — ORVX utility, tiers, buyback & burn
+- [docs/governance/README.md](docs/governance/README.md) — Snapshot governance
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
 - [SECURITY.md](SECURITY.md) — reporting vulnerabilities
 

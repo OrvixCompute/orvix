@@ -10,6 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (entries here as work progresses)
 
+## [0.2.0] — Unreleased — Whitepaper Alignment
+
+### Added
+- Provider staking: 25,000 ORVX minimum required to register as a compute provider
+- Stake-based tier system (Bronze/Silver/Gold/Diamond) replacing hold-based
+- Buyback engine: manual admin tooling (CLI + endpoint) to swap USDC revenue → ORVX via Jupiter
+- Burn mechanism: monthly burn of bought-back ORVX to the incinerator address
+- Revenue split: 70% provider, 30% platform (of which 50% buyback, 30% treasury, 20% ops), recorded per job
+- Snapshot.org integration for off-chain governance (`/v1/governance/snapshot-url` + docs)
+- New endpoints: `/v1/staking/*`, `/v1/account/tier`, `/v1/admin/buyback/*`, `/v1/admin/burn/*`, `/v1/governance/*`
+- Public transparency: buyback-history, burn-history, and network-stats endpoints
+- Admin auth via `X-Admin-Key` (ADMIN_API_KEY)
+- Database migrations 006, 007, 008 for staking, buyback/burn accounting, and stake-based tiers
+- Monthly burn-reminder systemd timer; buyback/burn CLIs under `scripts/`
+- Docs: governance set, burn procedure, scripts README
+
+### Changed
+- Tier is now derived from `staked_orvx` (kept in sync by a DB trigger), not wallet balance
+- Provider registration enforces the minimum stake
+- Inference billing applies the stake-based tier discount
+- `RequestValidationError` responses are now JSON-safe when error context contains Decimals
+
 ## [0.1.0] — Unreleased — Backend MVP
 
 ### Added
@@ -36,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frontend not yet implemented
 - Challenge-nonce store and rate limiter are in-memory (single-process) — shared store planned
 
-[Unreleased]: https://github.com/OrvixCompute/orvix/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/OrvixCompute/orvix/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/OrvixCompute/orvix/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/OrvixCompute/orvix/releases/tag/v0.1.0

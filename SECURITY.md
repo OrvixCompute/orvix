@@ -57,6 +57,10 @@ We commit to:
 - Database schema and stored procedures
 - The orchestrator ↔ node WebSocket protocol
 - Wallet-based authentication and API key handling
+- Staking flow (stake/unstake endpoints and the atomic stake RPCs)
+- Buyback admin endpoint and CLI (especially `ADMIN_API_KEY` handling)
+- Burn admin endpoint and CLI
+- Treasury wallet and keypair management
 - Frontend (when deployed)
 
 **Out of scope:**
@@ -105,6 +109,13 @@ Current alpha-state limitations we're actively working to address:
 - The challenge-nonce store and request rate limiter are in-memory (single-process);
   moving them to a shared store (Redis) is planned so they hold across restarts and instances.
 - Node-secret validation is minimal in the current build and will be hardened.
+- The treasury and buyback wallets are hot wallets (not multisig yet); migration to
+  separated wallets and then Squads multisig is planned.
+- Admin buyback/burn endpoints are protected by a single shared API key
+  (`ADMIN_API_KEY`) — rotate it regularly and prefer the CLI on the host.
+- On-chain buyback/burn execution is gated behind stub flags (`BUYBACK_STUB`,
+  `BURN_STUB`) until devnet-tested; real swaps/transfers are not yet implemented.
+- Buyback execution is manual (subject to admin availability).
 - No formal third-party security audit yet.
 - No deployed production environment yet.
 

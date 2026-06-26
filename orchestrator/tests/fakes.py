@@ -178,7 +178,28 @@ class _Rpc:
     def __init__(self, db, fn, params):
         self.db, self.fn, self.params = db, fn, params
 
+    def _accounting(self) -> dict:
+        ga = self.db._table("global_accounting")
+        row = next((r for r in ga.rows if r.get("id") == 1), None)
+        if row is None:
+            row = ga.insert_row({"id": 1})
+            for k in (
+                "buyback_budget_usdc",
+                "treasury_balance_usdc",
+                "operations_balance_usdc",
+                "orvx_held_for_burn",
+                "total_orvx_burned",
+                "total_orvx_bought",
+                "total_usdc_spent_on_buyback",
+            ):
+                row.setdefault(k, 0.0)
+        return row
+
     def execute(self):
+        # Buyback / burn / revenue-split functions don't take p_user_id.
+        if self.fn in ("record_buyback", "record_burn", "record_job_revenue_split"):
+            return self._execute_accounting()
+
         users = self.db._table("users")
         uid = self.params["p_user_id"]
         amt = Decimal(str(self.params["p_amount"]))
@@ -238,6 +259,111 @@ class _Rpc:
             if refund:
                 row["available_usdc"] = float(Decimal(str(row.get("available_usdc", 0))) + amt)
             return _Result(None)
+        if self.fn == "stake_orvx":
+            # Idempotent on the on-chain signature (mirrors migration 006).
+            sig = self.params.get("p_solana_sig")
+            stakes = self.db._table("stakes")
+            if sig is not None and any(s.get("solana_signature") == sig for s in stakes.rows):
+                return _Result(False)
+            row["staked_orvx"] = float(Decimal(str(row.get("staked_orvx", 0))) + amt)
+            stakes.insert_row(
+                {
+                    "user_id": uid,
+                    "type": "stake",
+                    "amount": float(amt),
+                    "solana_signature": sig,
+                    "reason": self.params.get("p_reason"),
+                }
+            )
+            return _Result(True)
+        if self.fn == "unstake_orvx":
+            current = Decimal(str(row.get("staked_orvx", 0)))
+            if current < amt:
+                return _Result(False)
+            if row.get("is_provider") and (current - amt) < Decimal("25000"):
+                return _Result(False)
+            row["staked_orvx"] = float(current - amt)
+            self.db._table("stakes").insert_row(
+                {
+                    "user_id": uid,
+                    "type": "unstake",
+                    "amount": float(amt),
+                    "solana_signature": self.params.get("p_solana_sig"),
+                    "reason": self.params.get("p_reason"),
+                }
+            )
+            return _Result(True)
+        raise ValueError(f"Unknown rpc: {self.fn}")
+
+    def _execute_accounting(self):
+        p = self.params
+        if self.fn == "record_job_revenue_split":
+            fee = Decimal(str(p["p_total_cost_usdc"])) - Decimal(str(p["p_provider_share_usdc"]))
+            acct = self._accounting()
+            acct["buyback_budget_usdc"] = float(
+                Decimal(str(acct.get("buyback_budget_usdc", 0))) + fee * Decimal("0.50")
+            )
+            acct["treasury_balance_usdc"] = float(
+                Decimal(str(acct.get("treasury_balance_usdc", 0))) + fee * Decimal("0.30")
+            )
+            acct["operations_balance_usdc"] = float(
+                Decimal(str(acct.get("operations_balance_usdc", 0))) + fee * Decimal("0.20")
+            )
+            return _Result(None)
+
+        if self.fn == "record_buyback":
+            spent = Decimal(str(p["p_usdc_spent"]))
+            received = Decimal(str(p["p_orvx_received"]))
+            acct = self._accounting()
+            if Decimal(str(acct.get("buyback_budget_usdc", 0))) < spent:
+                raise RuntimeError("Insufficient buyback budget")
+            event = self.db._table("buyback_events").insert_row(
+                {
+                    "usdc_spent": float(spent),
+                    "orvx_received": float(received),
+                    "execution_price_usdc_per_orvx": float(spent / received) if received else 0.0,
+                    "solana_signature": p["p_solana_sig"],
+                    "executed_by": p["p_executor"],
+                    "notes": p.get("p_notes"),
+                }
+            )
+            acct["buyback_budget_usdc"] = float(
+                Decimal(str(acct.get("buyback_budget_usdc", 0))) - spent
+            )
+            acct["orvx_held_for_burn"] = float(
+                Decimal(str(acct.get("orvx_held_for_burn", 0))) + received
+            )
+            acct["total_orvx_bought"] = float(
+                Decimal(str(acct.get("total_orvx_bought", 0))) + received
+            )
+            acct["total_usdc_spent_on_buyback"] = float(
+                Decimal(str(acct.get("total_usdc_spent_on_buyback", 0))) + spent
+            )
+            return _Result(event["id"])
+
+        if self.fn == "record_burn":
+            burned = Decimal(str(p["p_orvx_burned"]))
+            acct = self._accounting()
+            if Decimal(str(acct.get("orvx_held_for_burn", 0))) < burned:
+                raise RuntimeError("Insufficient ORVX held for burn")
+            event = self.db._table("burn_events").insert_row(
+                {
+                    "orvx_burned": float(burned),
+                    "solana_signature": p["p_solana_sig"],
+                    "period_start": p["p_period_start"],
+                    "period_end": p["p_period_end"],
+                    "executed_by": p["p_executor"],
+                    "notes": p.get("p_notes"),
+                }
+            )
+            acct["orvx_held_for_burn"] = float(
+                Decimal(str(acct.get("orvx_held_for_burn", 0))) - burned
+            )
+            acct["total_orvx_burned"] = float(
+                Decimal(str(acct.get("total_orvx_burned", 0))) + burned
+            )
+            return _Result(event["id"])
+
         raise ValueError(f"Unknown rpc: {self.fn}")
 
 

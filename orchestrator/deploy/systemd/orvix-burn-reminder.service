@@ -1,0 +1,12 @@
+[Unit]
+Description=Orvix monthly burn reminder (does NOT auto-execute the burn)
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Run as the orchestrator service user so it reads the same .env.
+User=orvix
+WorkingDirectory=/opt/orvix/orchestrator
+EnvironmentFile=/opt/orvix/orchestrator/.env
+# Logs ORVX currently held for burn. A human still runs `burn.py execute`.
+ExecStart=/usr/bin/env bash -lc 'echo "[orvix burn reminder] $(date -u)"; python scripts/burn.py status'

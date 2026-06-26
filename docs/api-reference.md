@@ -117,13 +117,86 @@ List pending top-up intents.
 
 ---
 
+## Account
+
+### `GET /v1/account/tier`
+Return your **stake-based** tier, discount, and progress to the next tier.
+**Auth: JWT.**
+
+```json
+{
+  "tier": "gold",
+  "staked_orvx": "75000",
+  "discount_pct": 15,
+  "next_tier": { "name": "diamond", "required_stake": "250000", "additional_needed": "175000" }
+}
+```
+
+---
+
+## Staking
+
+### `POST /v1/staking/stake-intent`
+Create a memo'd intent for an ORVX stake deposit. **Auth: JWT.**
+Body: `{ "amount": <number> }`. Send ORVX with the returned memo to the treasury;
+the listener credits your stake automatically.
+
+### `POST /v1/staking/unstake`
+Unstake ORVX and queue a payout. **Auth: JWT.**
+Body: `{ "amount": <number>, "destination_wallet": <optional> }`. Providers cannot
+unstake below the 25,000 ORVX minimum (`400 provider_minimum_stake`).
+
+### `GET /v1/staking/status`
+Your current stake, derived tier, next tier, and stake history. **Auth: JWT.**
+
+### `GET /v1/staking/buyback-history`
+Recent buybacks (public, no auth) — each with its Solana signature for verification.
+
+### `GET /v1/staking/burn-history`
+Recent burns (public, no auth) — each with its Solana signature.
+
+### `GET /v1/staking/network-stats`
+Public dashboard data: total staked, provider count, buyback budget, ORVX held for
+burn, totals burned/bought, and last buyback/burn timestamps.
+
+---
+
+## Governance
+
+### `GET /v1/governance/snapshot-url`
+Return the Snapshot space slug and URL for off-chain voting. No auth required.
+
+---
+
+## Admin
+
+Admin endpoints require the `X-Admin-Key` header (separate from JWT; set via
+`ADMIN_API_KEY`). Disabled when `ADMIN_API_KEY` is unset.
+
+### `POST /v1/admin/buyback/execute`
+Execute a USDC→ORVX buyback via Jupiter.
+Body: `{ "amount_usdc": <number>, "slippage_bps": <int, default 50> }`.
+
+### `GET /v1/admin/buyback/status`
+Buyback budget, last buyback, and ORVX held for burn.
+
+### `POST /v1/admin/burn/execute`
+Burn ORVX to the incinerator.
+Body: `{ "amount": <optional, default all held>, "period_start": <iso>, "period_end": <iso> }`.
+
+### `GET /v1/admin/burn/status`
+ORVX held for burn, total burned, and last burn.
+
+---
+
 ## Provider
 
 All require **Auth: JWT.**
 
 ### `POST /v1/provider/register`
 Register the current account as a provider. Returns a node secret used by the
-node agent to authenticate.
+node agent to authenticate. **Requires a stake of at least 25,000 ORVX** — returns
+`400 insufficient_stake` otherwise. Stake first via `POST /v1/staking/stake-intent`.
 
 ### `POST /v1/provider/regenerate-secret`
 Rotate the provider's node secret.

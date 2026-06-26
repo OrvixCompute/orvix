@@ -31,7 +31,7 @@ from app.models.inference import (
     Usage,
 )
 from app.models.protocol import JobMessage
-from app.services import inference_service
+from app.services import inference_service, tier_service
 from app.services.billing_service import BillingService
 from app.services.node_manager import NodeTimeoutError, node_manager
 
@@ -77,7 +77,8 @@ def _record_job(
     status: str = "completed",
     error_message: str | None = None,
 ) -> None:
-    db.table("jobs").insert(
+    provider_earning = _provider_earning(cost)
+    inserted = db.table("jobs").insert(
         {
             "user_id": user_id,
             "api_key_id": api_key_id,
@@ -86,13 +87,29 @@ def _record_job(
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "cost_usdc": float(cost),
-            "provider_earning_usdc": float(_provider_earning(cost)),
+            "provider_earning_usdc": float(provider_earning),
             "latency_ms": latency_ms,
             "status": status,
             "error_message": error_message,
             "is_mock": is_mock,
         }
     ).execute()
+
+    # Split the platform fee (cost - provider share) 50/30/20 into the buyback
+    # budget / treasury / operations buckets. Best-effort: the response is already
+    # computed, so a bookkeeping failure must not fail the request.
+    try:
+        job_id = inserted.data[0]["id"]
+        db.rpc(
+            "record_job_revenue_split",
+            {
+                "p_job_id": job_id,
+                "p_total_cost_usdc": float(cost),
+                "p_provider_share_usdc": float(provider_earning),
+            },
+        ).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Revenue split recording failed for job: {}", exc)
 
 
 @router.post("/chat/completions")
@@ -105,7 +122,8 @@ async def chat_completions(
     started = time.perf_counter()
     user = auth["user"]
     api_key = auth["api_key"]
-    tier = user["tier"]
+    # Tier is stake-based: derived from the user's staked ORVX, not a stored flag.
+    tier = tier_service.tier_for_stake(user.get("staked_orvx"))
 
     _check_rate_limit(api_key["id"])
     inference_service.validate_model(body.model)

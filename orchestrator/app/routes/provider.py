@@ -10,9 +10,10 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response
 from supabase import Client
 
+from app.config import settings
 from app.database import get_supabase
 from app.dependencies import get_current_user
-from app.exceptions import NotFoundError
+from app.exceptions import NotFoundError, ValidationError
 from app.models.protocol import ShutdownMessage
 from app.models.provider import (
     ProviderRegisterRequest,
@@ -59,7 +60,21 @@ async def register_provider(
     current_user: dict = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    """Opt the user in as a provider and issue a node secret (shown once)."""
+    """Opt the user in as a provider and issue a node secret (shown once).
+
+    Requires the whitepaper minimum stake (PROVIDER_MIN_STAKE_ORVX) to be held in
+    custody first — stake via POST /v1/staking/stake-intent.
+    """
+    staked = Decimal(str(current_user.get("staked_orvx", 0)))
+    minimum = Decimal(settings.PROVIDER_MIN_STAKE_ORVX)
+    if staked < minimum:
+        raise ValidationError(
+            f"Provider registration requires staking at least "
+            f"{settings.PROVIDER_MIN_STAKE_ORVX} ORVX.",
+            error_code="insufficient_stake",
+            details={"current_stake": format(staked, "f"), "required": format(minimum, "f")},
+        )
+
     secret = secrets.token_urlsafe(24)
     update = {"is_provider": True, "provider_secret_hash": _hash_secret(secret)}
     if body.display_name:

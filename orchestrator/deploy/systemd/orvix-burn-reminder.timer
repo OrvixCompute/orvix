@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Orvix burn reminder on the 1st of each month
+
+[Timer]
+# 09:00 UTC on the 1st of every month.
+OnCalendar=*-*-01 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -88,6 +88,62 @@ def test_happy_path_non_streaming(client_and_db):
     assert db._table("users").rows[0]["balance_usdc"] < 1000.0
 
 
+def test_tier_header_is_stake_based(client_and_db):
+    """The served tier comes from staked_orvx, not the stored users.tier column."""
+    client, db = client_and_db
+    # Stored tier says bronze, but the stake puts them at diamond.
+    _make_user(db, tier="bronze")
+    db._table("users").rows[0]["staked_orvx"] = 250000.0
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={
+            "model": "qwen-2.5-7b",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 64,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["X-Orvix-Tier"] == "diamond"
+
+
+def test_tier_header_bronze_when_unstaked(client_and_db):
+    client, db = client_and_db
+    _make_user(db, tier="gold")  # stored column ignored
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={
+            "model": "qwen-2.5-7b",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 64,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["X-Orvix-Tier"] == "bronze"
+
+
+def test_job_accrues_buyback_budget(client_and_db):
+    """A completed job splits its platform fee into the buyback budget."""
+    client, db = client_and_db
+    _make_user(db)
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={
+            "model": "qwen-2.5-7b",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 64,
+        },
+    )
+    assert resp.status_code == 200
+    acct = next(r for r in db._table("global_accounting").rows if r["id"] == 1)
+    # Platform fee = 30% of cost; buyback gets 50% of that. Both > 0.
+    assert float(acct["buyback_budget_usdc"]) > 0
+    assert float(acct["treasury_balance_usdc"]) > 0
+    assert float(acct["operations_balance_usdc"]) > 0
+
+
 def test_streaming_emits_done(client_and_db):
     client, db = client_and_db
     _make_user(db)
