@@ -1,0 +1,53 @@
+name: Dependency Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * 1'  # Monday 00:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # audit both packages even if one has findings
+      matrix:
+        include:
+          - name: orchestrator
+            req: orchestrator/requirements.txt
+          - name: node
+            req: orvix-node/requirements.txt
+    name: audit-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip pip-audit
+
+      # Gating step: pip-audit exits non-zero if any known vulnerability is found
+      # (and, with --strict, if any dependency could not be audited). pip-audit
+      # has no native severity-level gating, so this fails on ANY vulnerability —
+      # stricter than HIGH/CRITICAL-only. To relax later, parse the JSON output
+      # below and gate on a severity allowlist instead.
+      - name: Audit ${{ matrix.name }} (human-readable, gating)
+        run: pip-audit --requirement ${{ matrix.req }} --desc --strict
+
+      # Always produce a JSON report as a build artifact (even when the gate fails).
+      - name: Audit ${{ matrix.name }} (JSON report)
+        if: always()
+        run: pip-audit --requirement ${{ matrix.req }} --format json --output ${{ matrix.name }}-audit.json || true
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-audit
+          path: ${{ matrix.name }}-audit.json
+          if-no-files-found: ignore
