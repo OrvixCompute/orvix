@@ -69,6 +69,25 @@ ORVIX_NODE_STUB_GPU=true orvix-node start
 7. Address review feedback.
 8. Squash and merge once approved.
 
+## Deployed-Node / Pod Code Discipline
+
+> 🚨 **CRITICAL:** Any code written or patched **directly on a deployed node or
+> pod** (e.g. a RunPod GPU pod) **MUST be ported back to the repo before the next
+> deploy or pod restart.**
+>
+> Code that lives only on a pod is **lost** when the container disk is wiped
+> (RunPod stop/start), when the pod is terminated, or when nodes are redeployed
+> from git. We hit exactly this: a working `vLLM` HTTP-proxy backend existed only
+> on the pod while the repo still had a `NotImplementedError` skeleton.
+>
+> After any work on a pod/node, before stopping or redeploying it:
+> 1. `git status` and `git diff` on the pod checkout to see what changed.
+> 2. Commit the change to a branch and push, or copy the file back to your local
+>    repo and commit there.
+> 3. Confirm `git status` is clean on the pod (everything is in the repo).
+>
+> See [docs/operations.md](docs/operations.md#code-synchronization-discipline).
+
 ## Coding Standards
 
 - **Style:** PEP 8, enforced by `ruff`.
