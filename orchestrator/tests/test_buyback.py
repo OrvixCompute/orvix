@@ -139,6 +139,24 @@ def test_admin_buyback_status(admin_client):
     assert "orvx_held_for_burn" in body
 
 
+def test_admin_feature_flags(monkeypatch):
+    monkeypatch.setattr(admin_mod.settings, "ADMIN_API_KEY", "secret-admin-key")
+    monkeypatch.setattr(admin_mod.settings, "REQUIRE_STAKE_FOR_PROVIDER", False)
+    client = TestClient(app)
+    resp = client.get("/v1/admin/feature-flags", headers={"X-Admin-Key": "secret-admin-key"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["require_stake_for_provider"] is False
+    assert body["buyback_stub"] is True
+    assert "admin_api_key_set" in body
+
+
+def test_admin_feature_flags_requires_key(monkeypatch):
+    monkeypatch.setattr(admin_mod.settings, "ADMIN_API_KEY", "secret-admin-key")
+    client = TestClient(app)
+    assert client.get("/v1/admin/feature-flags").status_code == 401
+
+
 def test_admin_disabled_when_no_key(monkeypatch):
     monkeypatch.setattr(admin_mod.settings, "ADMIN_API_KEY", "")
     db = _db_with_budget(1000)

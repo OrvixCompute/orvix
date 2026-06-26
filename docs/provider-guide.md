@@ -10,9 +10,17 @@ connects to the orchestrator, receives inference jobs, runs them on your GPU,
 and streams the results back. In return, you earn a share of the revenue from
 the requests you serve.
 
+## Current Status (Alpha)
+
+> 🟢 **During the alpha phase, the 25,000 ORVX stake requirement is suspended.**
+> Providers can register **without staking** (the orchestrator runs with
+> `REQUIRE_STAKE_FOR_PROVIDER=false`). The stake requirement will activate before
+> public testnet — early providers will be **grandfathered** or given time to
+> acquire and stake ORVX. The stake mechanics below describe the post-alpha model.
+
 ## Provider requirements
 
-To run a node you need eligible **hardware** and a **stake**.
+To run a node you need eligible **hardware** and (post-alpha) a **stake**.
 
 ### Hardware
 

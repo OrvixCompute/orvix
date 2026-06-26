@@ -26,6 +26,22 @@ def _executor() -> str:
     return settings.TREASURY_WALLET_ADDRESS or "admin-api"
 
 
+@router.get("/feature-flags")
+async def feature_flags():
+    """Current runtime feature-flag state (admin-only)."""
+    return {
+        "require_stake_for_provider": settings.REQUIRE_STAKE_FOR_PROVIDER,
+        "provider_min_stake_orvx": settings.PROVIDER_MIN_STAKE_ORVX,
+        "buyback_stub": settings.BUYBACK_STUB,
+        "burn_stub": settings.BURN_STUB,
+        "payout_stub": settings.PAYOUT_STUB,
+        "enable_payment_listener": settings.ENABLE_PAYMENT_LISTENER,
+        "enable_payout_worker": settings.ENABLE_PAYOUT_WORKER,
+        "orvx_mint_configured": bool(settings.ORVX_MINT_ADDRESS),
+        "admin_api_key_set": bool(settings.ADMIN_API_KEY),
+    }
+
+
 @router.get("/buyback/status")
 async def buyback_status(db: Client = Depends(get_supabase)):
     return BuybackService(db).status()

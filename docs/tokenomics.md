@@ -34,6 +34,11 @@ Providers must stake at least **25,000 ORVX** to register and run nodes. Staking
 is **custodial (off-chain ledger) in v1**, moving **on-chain in v2**. Stake is
 deposited via a memo'd transfer to the treasury and credited automatically.
 
+> ⚠️ **Stake requirement currently suspended for the alpha phase**
+> (`REQUIRE_STAKE_FOR_PROVIDER=false`). Providers can register without staking
+> for now; the requirement activates before public testnet. See
+> [provider-guide.md](./provider-guide.md#current-status-alpha) for the migration plan.
+
 ### Premium access tiers
 Tiers are **stake-based**: your tier is determined by how much ORVX you have
 staked, not how much you hold.
