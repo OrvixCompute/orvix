@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+import app.routes.provider as provider_mod
 import app.services.payout_service as payout_mod
 from app.database import get_supabase
 from app.dependencies import get_current_user
@@ -39,7 +40,8 @@ def test_register_returns_secret(ctx):
     assert row["provider_secret_hash"]
 
 
-def test_register_rejected_when_stake_below_minimum(monkeypatch):
+def test_provider_register_with_stake_required_true_blocks_below_25k(monkeypatch):
+    monkeypatch.setattr(provider_mod.settings, "REQUIRE_STAKE_FOR_PROVIDER", True)
     db = FakeSupabase()
     # below the 25K minimum, and not yet a provider
     user = db.add_user(
@@ -58,6 +60,27 @@ def test_register_rejected_when_stake_below_minimum(monkeypatch):
         row = next(r for r in db._table("users").rows if r["id"] == user["id"])
         assert row.get("is_provider") is False
         assert row.get("provider_secret_hash") is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_provider_register_with_stake_required_false_allows_zero_stake(monkeypatch):
+    # Default alpha behaviour: flag false -> no stake check, 0 stake allowed.
+    monkeypatch.setattr(provider_mod.settings, "REQUIRE_STAKE_FOR_PROVIDER", False)
+    db = FakeSupabase()
+    user = db.add_user(
+        tier="bronze", staked_orvx=0.0, is_provider=False, provider_secret_hash=None
+    )
+    app.dependency_overrides[get_supabase] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: user
+    client = TestClient(app)
+    try:
+        resp = client.post("/v1/provider/register", json={})
+        assert resp.status_code == 200
+        assert resp.json()["node_secret"]
+        row = next(r for r in db._table("users").rows if r["id"] == user["id"])
+        assert row["is_provider"] is True
+        assert row["provider_secret_hash"]
     finally:
         app.dependency_overrides.clear()
 

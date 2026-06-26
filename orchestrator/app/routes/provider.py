@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import get_supabase
 from app.dependencies import get_current_user
 from app.exceptions import NotFoundError, ValidationError
+from app.logger import logger
 from app.models.protocol import ShutdownMessage
 from app.models.provider import (
     ProviderRegisterRequest,
@@ -62,17 +63,25 @@ async def register_provider(
 ):
     """Opt the user in as a provider and issue a node secret (shown once).
 
-    Requires the whitepaper minimum stake (PROVIDER_MIN_STAKE_ORVX) to be held in
-    custody first — stake via POST /v1/staking/stake-intent.
+    The whitepaper minimum stake (PROVIDER_MIN_STAKE_ORVX) is enforced only when
+    REQUIRE_STAKE_FOR_PROVIDER is true. During the alpha phase the flag is false,
+    so providers can register without staking (stake via
+    POST /v1/staking/stake-intent once the requirement is activated).
     """
     staked = Decimal(str(current_user.get("staked_orvx", 0)))
     minimum = Decimal(settings.PROVIDER_MIN_STAKE_ORVX)
-    if staked < minimum:
-        raise ValidationError(
-            f"Provider registration requires staking at least "
-            f"{settings.PROVIDER_MIN_STAKE_ORVX} ORVX.",
-            error_code="insufficient_stake",
-            details={"current_stake": format(staked, "f"), "required": format(minimum, "f")},
+    if settings.REQUIRE_STAKE_FOR_PROVIDER:
+        if staked < minimum:
+            raise ValidationError(
+                f"Provider registration requires staking at least "
+                f"{settings.PROVIDER_MIN_STAKE_ORVX} ORVX.",
+                error_code="insufficient_stake",
+                details={"current_stake": format(staked, "f"), "required": format(minimum, "f")},
+            )
+    elif staked == 0:
+        logger.warning(
+            "Provider {} registered without stake (REQUIRE_STAKE_FOR_PROVIDER=false)",
+            current_user["id"],
         )
 
     secret = secrets.token_urlsafe(24)

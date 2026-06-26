@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     )
 
     # --- Staking / tokenomics (whitepaper alignment) -----------------------
+    REQUIRE_STAKE_FOR_PROVIDER: bool = Field(
+        False,
+        description="When false (alpha), provider register skips the staked_orvx minimum check",
+    )
     PROVIDER_MIN_STAKE_ORVX: int = Field(
         25000, description="Minimum ORVX a user must stake to register as a provider"
     )
