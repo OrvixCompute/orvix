@@ -15,7 +15,12 @@ VALID_WALLET = "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9"
 @pytest.fixture
 def ctx(monkeypatch):
     db = FakeSupabase()
-    user = db.add_user(tier="gold", available_usdc=500.0, lifetime_earnings_usdc=500.0)
+    user = db.add_user(
+        tier="gold",
+        available_usdc=500.0,
+        lifetime_earnings_usdc=500.0,
+        staked_orvx=50000.0,  # above the 25K provider minimum
+    )
     app.dependency_overrides[get_supabase] = lambda: db
     app.dependency_overrides[get_current_user] = lambda: user
     monkeypatch.setattr(payout_mod, "get_supabase", lambda: db)
@@ -32,6 +37,29 @@ def test_register_returns_secret(ctx):
     row = next(r for r in db._table("users").rows if r["id"] == user["id"])
     assert row["is_provider"] is True
     assert row["provider_secret_hash"]
+
+
+def test_register_rejected_when_stake_below_minimum(monkeypatch):
+    db = FakeSupabase()
+    # below the 25K minimum, and not yet a provider
+    user = db.add_user(
+        tier="bronze", staked_orvx=1000.0, is_provider=False, provider_secret_hash=None
+    )
+    app.dependency_overrides[get_supabase] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: user
+    client = TestClient(app)
+    try:
+        resp = client.post("/v1/provider/register", json={})
+        assert resp.status_code == 400
+        body = resp.json()["error"]
+        assert body["code"] == "insufficient_stake"
+        assert body["required"] == "25000"
+        # User was not flipped to provider.
+        row = next(r for r in db._table("users").rows if r["id"] == user["id"])
+        assert row.get("is_provider") is False
+        assert row.get("provider_secret_hash") is None
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_regenerate_secret_changes_hash(ctx):

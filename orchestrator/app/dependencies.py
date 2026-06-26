@@ -5,10 +5,12 @@
 """
 
 import re
+import secrets
 
-from fastapi import BackgroundTasks, Depends, Request
+from fastapi import BackgroundTasks, Depends, Header, Request
 from supabase import Client
 
+from app.config import settings
 from app.database import get_supabase
 from app.exceptions import UnauthorizedError
 from app.logger import logger
@@ -91,3 +93,15 @@ async def get_user_from_api_key(
     background_tasks.add_task(_touch_last_used, api_key["id"])
 
     return {"user": user, "api_key": api_key}
+
+
+def require_admin(x_admin_key: str | None = Header(None)) -> bool:
+    """Gate admin endpoints behind the ADMIN_API_KEY shared secret (X-Admin-Key)."""
+    if not settings.ADMIN_API_KEY:
+        raise UnauthorizedError(
+            "Admin endpoints are disabled (ADMIN_API_KEY not set)",
+            error_code="admin_disabled",
+        )
+    if not x_admin_key or not secrets.compare_digest(x_admin_key, settings.ADMIN_API_KEY):
+        raise UnauthorizedError("Invalid admin key", error_code="invalid_admin_key")
+    return True

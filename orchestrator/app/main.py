@@ -10,7 +10,19 @@ from app.database import test_connection
 from app.exceptions import register_exception_handlers
 from app.logger import configure_logging, logger
 from app.middleware import register_middleware
-from app.routes import api_keys, auth, billing, health, inference, node, provider
+from app.routes import (
+    account,
+    admin,
+    api_keys,
+    auth,
+    billing,
+    governance,
+    health,
+    inference,
+    node,
+    provider,
+    staking,
+)
 from app.services.node_manager import node_manager
 from app.services.payment_listener import payment_listener
 from app.services.payout_service import payout_service
@@ -68,3 +80,7 @@ app.include_router(inference.router)
 app.include_router(billing.router)
 app.include_router(node.router)
 app.include_router(provider.router)
+app.include_router(staking.router)
+app.include_router(account.router)
+app.include_router(admin.router)
+app.include_router(governance.router)

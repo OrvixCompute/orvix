@@ -27,16 +27,23 @@ curl https://api.orvix.xyz/v1/chat/completions \
   }'
 ```
 
+Pricing is per token, with a **stake-based discount** (up to 25% off) — stake ORVX
+to lower your per-token cost. See [Tokenomics](./tokenomics.md#premium-access-tiers)
+and `GET /v1/account/tier`.
+
 Next steps:
 
 - Read [orchestrator/README.md](../orchestrator/README.md) for backend setup and
   how authentication / API keys work.
-- See the [API Reference](./api-reference.md) for every endpoint.
+- See the [API Reference](./api-reference.md) for every endpoint (including
+  `/v1/staking/*` and `/v1/account/tier`).
 
 ## For providers (run a node)
 
 A provider installs a lightweight agent that connects to the orchestrator over
-WebSocket and executes inference jobs on your GPU.
+WebSocket and executes inference jobs on your GPU. **Heads-up:** becoming a
+provider requires staking **25,000 ORVX** in addition to eligible hardware — see
+the [Provider Guide](./provider-guide.md#provider-requirements).
 
 ```bash
 curl -fsSL https://get.orvix.xyz | sh   # placeholder install script

@@ -22,6 +22,7 @@ class PaymentListener:
         self._stop = asyncio.Event()
         self._last_signature: str | None = None
         self._treasury_token_accounts: set[str] = set()
+        self._treasury_orvx_token_accounts: set[str] = set()
 
     async def start(self) -> None:
         """Spawn the polling loop as a background task."""
@@ -54,7 +55,17 @@ class PaymentListener:
                 settings.TREASURY_WALLET_ADDRESS, settings.USDC_MINT_ADDRESS
             )
             self._treasury_token_accounts = {a["pubkey"] for a in accounts}
-            logger.info("Treasury token accounts: {}", self._treasury_token_accounts or "(none yet)")
+            logger.info("Treasury USDC token accounts: {}", self._treasury_token_accounts or "(none yet)")
+
+            if settings.ORVX_MINT_ADDRESS:
+                orvx_accounts = await sol.get_token_accounts_by_owner(
+                    settings.TREASURY_WALLET_ADDRESS, settings.ORVX_MINT_ADDRESS
+                )
+                self._treasury_orvx_token_accounts = {a["pubkey"] for a in orvx_accounts}
+                logger.info(
+                    "Treasury ORVX token accounts: {}",
+                    self._treasury_orvx_token_accounts or "(none yet)",
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not resolve treasury token accounts: {}", exc)
 
@@ -113,6 +124,12 @@ class PaymentListener:
             return
 
         memo = sol.extract_memo(parsed)
+
+        # Stake deposits use a distinct memo prefix and the ORVX mint, not USDC.
+        if memo and memo.startswith("orvix_stake_"):
+            await self._process_stake(db, parsed, signature, memo)
+            return
+
         transfers = sol.extract_spl_transfers(
             parsed, settings.USDC_MINT_ADDRESS, settings.TREASURY_WALLET_ADDRESS
         )
@@ -196,6 +213,73 @@ class PaymentListener:
             new_status,
             signature,
         )
+
+    # --- staking deposits --------------------------------------------------
+    async def _process_stake(self, db, parsed: dict, signature: str, memo: str) -> None:
+        if not settings.ORVX_MINT_ADDRESS:
+            logger.warning(
+                "Stake deposit seen but ORVX_MINT_ADDRESS not configured: sig={}", signature
+            )
+            return
+
+        sol = get_solana_service()
+        transfers = sol.extract_spl_transfers(
+            parsed, settings.ORVX_MINT_ADDRESS, settings.TREASURY_WALLET_ADDRESS
+        )
+        if self._treasury_orvx_token_accounts:
+            transfers = [
+                t for t in transfers if t.get("destination") in self._treasury_orvx_token_accounts
+            ]
+        if not transfers:
+            return  # not an ORVX deposit to the treasury
+
+        total = sum(Decimal(str(t["amount"])) for t in transfers)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        intent_res = (
+            db.table("staking_intents")
+            .select("*")
+            .eq("memo", memo)
+            .eq("status", "pending")
+            .gt("expires_at", now_iso)
+            .limit(1)
+            .execute()
+        )
+        if not intent_res.data:
+            logger.warning(
+                "Unattributed stake deposit (no matching intent): memo={} sig={} amount={}",
+                memo,
+                signature,
+                total,
+            )
+            return
+
+        await self._apply_stake(db, intent_res.data[0], signature, total)
+
+    async def _apply_stake(self, db, intent: dict, signature: str, amount: Decimal) -> None:
+        user_id = intent["user_id"]
+
+        # stake_orvx credits users.staked_orvx and logs the stakes row atomically.
+        # It is idempotent on the on-chain signature: a duplicate returns false.
+        res = db.rpc(
+            "stake_orvx",
+            {
+                "p_user_id": user_id,
+                "p_amount": float(amount),
+                "p_solana_sig": signature,
+                "p_reason": "stake deposit",
+            },
+        ).execute()
+
+        if not res.data:
+            logger.info("Stake {} already credited — skipping", signature)
+            return
+
+        db.table("staking_intents").update(
+            {"status": "fulfilled", "fulfilled_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", intent["id"]).execute()
+
+        logger.info("Stake applied: user={} amount={} ORVX sig={}", user_id, amount, signature)
 
 
 payment_listener = PaymentListener()

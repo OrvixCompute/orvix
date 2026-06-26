@@ -48,6 +48,19 @@ class BalanceResponse(BaseModel):
     tier: str
 
 
+class NextTierInfo(BaseModel):
+    name: str
+    required_stake: str
+    additional_needed: str
+
+
+class TierResponse(BaseModel):
+    tier: str
+    staked_orvx: str
+    discount_pct: int
+    next_tier: Optional[NextTierInfo]
+
+
 class TransactionInfo(BaseModel):
     id: str
     type: str

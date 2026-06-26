@@ -13,6 +13,7 @@ from supabase import Client
 
 from app.exceptions import InsufficientBalanceError
 from app.logger import logger
+from app.services import tier_service
 
 
 class BillingService:
@@ -22,7 +23,7 @@ class BillingService:
     def get_balance(self, user_id: str) -> dict:
         res = (
             self.db.table("users")
-            .select("balance_usdc, tier")
+            .select("balance_usdc, staked_orvx")
             .eq("id", user_id)
             .limit(1)
             .execute()
@@ -32,7 +33,8 @@ class BillingService:
         row = res.data[0]
         return {
             "balance_usdc": str(row["balance_usdc"]),
-            "tier": row["tier"],
+            # Stake-based tier (derived), not the stored users.tier column.
+            "tier": tier_service.tier_for_stake(row.get("staked_orvx")),
         }
 
     def deduct_usdc(self, user_id: str, amount: Decimal) -> Decimal:

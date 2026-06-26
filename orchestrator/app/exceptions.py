@@ -1,6 +1,7 @@
 """Custom exception hierarchy and the FastAPI handlers that render them as JSON."""
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -107,7 +108,9 @@ def register_exception_handlers(app: FastAPI) -> None:
                 request,
                 "invalid_request",
                 "Request validation failed",
-                {"details": exc.errors()},
+                # jsonable_encoder makes non-JSON-native ctx values (e.g. the
+                # Decimal bound on a `gt=0` field) safe to serialize.
+                {"details": jsonable_encoder(exc.errors())},
             ),
         )
 
