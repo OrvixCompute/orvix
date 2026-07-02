@@ -5,6 +5,7 @@ jobs, auto-reconnect with exponential backoff.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from typing import Awaitable, Callable
 from urllib.parse import urlparse
@@ -15,6 +16,7 @@ from websockets.exceptions import ConnectionClosed
 from orvix_node.config import NodeConfig
 from orvix_node.exceptions import AuthError
 from orvix_node.gpu import detector
+from orvix_node.inference.router import available_engine_types
 from orvix_node.logger import logger
 from orvix_node.protocol import (
     BaseMessage,
@@ -174,7 +176,16 @@ class OrchestratorClient:
             models_supported=[self.config.model],
             max_concurrent_jobs=self.config.max_concurrent_jobs,
         )
-        await ws.send(serialize(reg))
+        # Advertise engine capabilities + total VRAM as additive fields. These
+        # ride alongside the existing RegisterMessage on the wire without
+        # changing the shared protocol schema (the orchestrator ignores unknown
+        # fields today; it starts reading them in Session 3). Backward-compatible.
+        frame = reg.model_dump(mode="json")
+        frame["engines"] = available_engine_types(self.config.enable_image_engine)
+        frame["vram_gb"] = (
+            round(gpu.vram_total_mb / 1024, 1) if gpu.vram_total_mb else 0.0
+        )
+        await ws.send(json.dumps(frame))
 
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=ACK_TIMEOUT)

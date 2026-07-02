@@ -23,6 +23,7 @@ from typing import AsyncIterator, Optional
 import httpx
 
 from orvix_node.inference.base import (
+    ChatEngine,
     GenerateChunk,
     GenerateRequest,
     GenerateResponse,
@@ -34,7 +35,11 @@ _DEFAULT_ENDPOINT = "http://localhost:8000/v1"
 _DEFAULT_VLLM_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
 
-class VLLMBackend:
+class VLLMBackend(ChatEngine):
+    # Capability metadata (informational; the served model comes from config).
+    required_vram_gb = 18.0
+    supported_models = ["qwen-2.5-7b"]
+
     def __init__(
         self,
         model: str,
