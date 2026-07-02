@@ -2,7 +2,10 @@
 event loop via uvicorn.
 """
 
+from __future__ import annotations
+
 import asyncio
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI
@@ -13,7 +16,7 @@ from orvix_node.state import state
 from orvix_node.version import __version__
 
 
-def create_health_app() -> FastAPI:
+def create_health_app(manager: Optional["object"] = None) -> FastAPI:
     app = FastAPI(title="Orvix Node", version=__version__)
 
     @app.get("/health")
@@ -29,15 +32,37 @@ def create_health_app() -> FastAPI:
         data["gpu"] = detector.get_metrics().model_dump(mode="json")
         return data
 
+    @app.get("/v1/status")
+    async def status() -> dict:
+        """Engine/VRAM/uptime status — used for node observability and to see
+        which engine is currently resident on the GPU."""
+        gpu = detector.get_metrics()
+        vram_free_gb = (
+            round((gpu.memory_total_mb - gpu.memory_used_mb) / 1024, 2)
+            if gpu.memory_total_mb
+            else None
+        )
+        return {
+            "node_id": state.node_id,
+            "uptime_seconds": round(state.uptime_seconds(), 1),
+            "orchestrator_connected": state.orchestrator_connected,
+            "current_jobs": len(state.current_jobs),
+            "vram_free_gb": vram_free_gb,
+            "vram_total_gb": round(gpu.memory_total_mb / 1024, 2) if gpu.memory_total_mb else None,
+            "manager": manager.status() if manager is not None else None,
+        }
+
     return app
 
 
 class HealthServer:
     """Runs the health app as a background uvicorn server in the current loop."""
 
-    def __init__(self, port: int, host: str = "127.0.0.1") -> None:
+    def __init__(
+        self, port: int, host: str = "127.0.0.1", manager: Optional["object"] = None
+    ) -> None:
         config = uvicorn.Config(
-            create_health_app(),
+            create_health_app(manager),
             host=host,
             port=port,
             log_level="warning",

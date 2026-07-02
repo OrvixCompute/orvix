@@ -47,13 +47,13 @@ class MockBackend(ChatEngine):
         self.model: str | None = None
         self._ready = False
 
-    async def initialize(self, model: str) -> None:
-        logger.info("Mock backend initialized for model {}", model)
+    async def load(self, model_id: str) -> None:
+        logger.info("Mock backend loading model {}", model_id)
         await asyncio.sleep(1.0)  # simulate load time
-        self.model = model
+        self.model = model_id
         self._ready = True
 
-    async def is_ready(self) -> bool:
+    async def is_loaded(self) -> bool:
         return self._ready
 
     def _make_content(self, messages: list[dict]) -> str:
@@ -102,6 +102,6 @@ class MockBackend(ChatEngine):
             ),
         )
 
-    async def shutdown(self) -> None:
+    async def unload(self) -> None:
         self._ready = False
-        logger.info("Mock backend shut down")
+        logger.info("Mock backend unloaded")

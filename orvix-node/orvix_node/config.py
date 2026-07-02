@@ -52,9 +52,16 @@ class NodeConfig(BaseModel):
     # Inference backend: "mock" (default) or "vllm".
     backend: str = "mock"
     # Advertise image (Flux) capability at registration. Opt-in: only enable once
-    # the ModelManager swap logic (Session 2) is deployed, else the node would
-    # advertise an engine it cannot yet serve.
+    # the ModelManager swap logic is deployed, else the node would advertise an
+    # engine it cannot yet serve. Dual-mode (chat + image on one GPU) also needs
+    # vllm_managed=true so the manager can free VRAM by stopping the vLLM server.
     enable_image_engine: bool = False
+    # Let the node own the vLLM server as a subprocess (start on load, kill on
+    # unload to free VRAM). Required for chat<->image swap; keep false when the
+    # vLLM server is managed out of band.
+    vllm_managed: bool = False
+    # Unload the resident engine after this many idle minutes to free VRAM.
+    idle_unload_minutes: int = 10
 
     def masked(self) -> dict:
         """Config as a dict with secrets masked, for display."""
@@ -133,6 +140,11 @@ heartbeat_interval: 15
 health_port: 9000
 max_concurrent_jobs: 4
 backend: "mock"        # "mock" or "vllm"
+
+# Engines / VRAM (single-GPU swap):
+enable_image_engine: false   # advertise + serve Flux images (needs vllm_managed for dual-mode)
+vllm_managed: false          # node owns the vLLM server subprocess (kill on unload to free VRAM)
+idle_unload_minutes: 10      # unload the resident engine after this many idle minutes
 
 # Logging:
 log_level: "INFO"

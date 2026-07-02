@@ -1,16 +1,19 @@
-"""Tests for JobExecutor with the mock backend and a controllable fake backend."""
+"""Tests for JobExecutor driving engines through the ModelManager."""
 
 import asyncio
+from typing import AsyncIterator
 
 import pytest
 
 from orvix_node.executor import JobExecutor
 from orvix_node.inference.base import (
+    ChatEngine,
     GenerateChunk,
     GenerateRequest,
     GenerateResponse,
     GenerateUsage,
 )
+from orvix_node.inference.manager import ModelManager
 from orvix_node.inference.mock import MockBackend
 from orvix_node.protocol import JobMessage
 from orvix_node.state import state
@@ -43,9 +46,13 @@ def _job(stream=False, job_id="j1"):
     )
 
 
+def _executor(engine, max_concurrent=2):
+    """Wrap a single chat engine in a ModelManager and build an executor."""
+    return JobExecutor(ModelManager({"chat": engine}), max_concurrent=max_concurrent)
+
+
 async def test_mock_blocking_result_shape():
-    ex = JobExecutor(MockBackend("p"), max_concurrent=2)
-    await ex.initialize("qwen-2.5-7b")
+    ex = _executor(MockBackend("p"))
     out = Collector()
     await ex.execute(_job(stream=False), send_chunk=Collector(), send_result=out)
 
@@ -59,8 +66,7 @@ async def test_mock_blocking_result_shape():
 
 
 async def test_mock_streaming_yields_multiple_chunks():
-    ex = JobExecutor(MockBackend("p"), max_concurrent=2)
-    await ex.initialize("qwen-2.5-7b")
+    ex = _executor(MockBackend("p"))
     chunks = Collector()
     await ex.execute(_job(stream=True), send_chunk=chunks, send_result=Collector())
 
@@ -70,16 +76,17 @@ async def test_mock_streaming_yields_multiple_chunks():
     assert chunks.messages[-1].chunk["choices"][0]["finish_reason"] == "stop"
 
 
-class SlowBackend:
+class SlowBackend(ChatEngine):
     """Tracks max concurrency to verify the semaphore limit."""
 
     def __init__(self):
         self.active = 0
         self.max_active = 0
+        self._loaded = False
 
-    async def initialize(self, model): ...
-    async def is_ready(self): return True
-    async def shutdown(self): ...
+    async def load(self, model_id): self._loaded = True
+    async def unload(self): self._loaded = False
+    async def is_loaded(self): return self._loaded
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse:
         self.active += 1
@@ -90,15 +97,14 @@ class SlowBackend:
             self.active -= 1
         return GenerateResponse(content="x", prompt_tokens=1, completion_tokens=1)
 
-    async def generate_stream(self, request):
+    async def generate_stream(self, request) -> AsyncIterator[GenerateChunk]:
         yield GenerateChunk(delta_content="x")
         yield GenerateChunk(is_final=True, usage=GenerateUsage(prompt_tokens=1, completion_tokens=1))
 
 
 async def test_concurrency_limit_enforced():
     backend = SlowBackend()
-    ex = JobExecutor(backend, max_concurrent=2)
-    await ex.initialize("m")
+    ex = _executor(backend, max_concurrent=2)
     sink = Collector()
     jobs = [
         ex.execute(_job(job_id=f"j{i}"), send_chunk=sink, send_result=sink)
@@ -108,10 +114,13 @@ async def test_concurrency_limit_enforced():
     assert backend.max_active <= 2
 
 
-class BrokenBackend:
-    async def initialize(self, model): ...
-    async def is_ready(self): return True
-    async def shutdown(self): ...
+class BrokenBackend(ChatEngine):
+    def __init__(self):
+        self._loaded = False
+
+    async def load(self, model_id): self._loaded = True
+    async def unload(self): self._loaded = False
+    async def is_loaded(self): return self._loaded
 
     async def generate(self, request):
         raise RuntimeError("backend boom")
@@ -122,8 +131,7 @@ class BrokenBackend:
 
 
 async def test_errors_reported_as_failed_result():
-    ex = JobExecutor(BrokenBackend(), max_concurrent=1)
-    await ex.initialize("m")
+    ex = _executor(BrokenBackend(), max_concurrent=1)
     out = Collector()
     await ex.execute(_job(stream=False), send_chunk=Collector(), send_result=out)
     assert len(out.messages) == 1
@@ -134,8 +142,7 @@ async def test_errors_reported_as_failed_result():
 
 async def test_shutdown_waits_for_active_jobs():
     backend = SlowBackend()
-    ex = JobExecutor(backend, max_concurrent=4)
-    await ex.initialize("m")
+    ex = _executor(backend, max_concurrent=4)
     sink = Collector()
     job_task = asyncio.create_task(
         ex.execute(_job(), send_chunk=sink, send_result=sink)

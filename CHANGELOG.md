@@ -12,9 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FluxEngine` — Flux Schnell text-to-image via Diffusers (bfloat16, 1024×1024 / 4 steps defaults); heavy GPU deps imported lazily
 - Node advertises `engines` + `vram_gb` at registration (additive, backward-compatible; image is opt-in via `enable_image_engine`)
 - `image` optional extra (diffusers/transformers/accelerate/…) and opt-in `scripts/download_flux.py` pre-download helper
+- `ModelManager` — swaps chat/image engines through a single GPU's VRAM with a swap lock, drain-before-unload, idle unload (default 10 min), and thrash detection
+- Managed vLLM mode (`vllm_managed`): the node owns the vLLM server as a subprocess so `unload()` actually frees VRAM for the image engine (start on load, kill on unload)
+- Node `/v1/status` endpoint: current engine, VRAM free/total, uptime, active jobs
+- Config: `vllm_managed`, `idle_unload_minutes`
 
 ### Changed
-- vLLM and mock chat backends now subclass `ChatEngine` (behavior unchanged; existing tests pass)
+- Unified engine lifecycle to `load(model_id)` / `unload` / `is_loaded` across all engines (renamed from `initialize`/`is_ready`/`shutdown`)
+- The executor no longer owns a single backend; it routes each job through the `ModelManager`, loading/swapping the right engine on demand
 
 ## [0.2.0] — 2026-06-26 — Whitepaper Alignment
 

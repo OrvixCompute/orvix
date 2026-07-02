@@ -1,5 +1,11 @@
-"""Job execution: bridges orchestrator JobMessages to an InferenceBackend, with
-concurrency limiting, metrics, and streaming/non-streaming result delivery.
+"""Job execution: bridges orchestrator JobMessages to an inference engine via the
+ModelManager, with concurrency limiting, metrics, and streaming/non-streaming
+result delivery.
+
+The executor no longer owns a single backend; for each job it asks the
+ModelManager for the engine that serves the job's model (loading/swapping it into
+VRAM if needed), then runs generation on it. Only chat jobs flow here today —
+image dispatch arrives with the Session 3 protocol changes.
 """
 
 from __future__ import annotations
@@ -8,7 +14,8 @@ import asyncio
 import time
 from typing import Awaitable, Callable
 
-from orvix_node.inference.base import GenerateRequest, InferenceBackend
+from orvix_node.inference.base import ChatEngine, GenerateRequest
+from orvix_node.inference.manager import ModelManager
 from orvix_node.logger import logger
 from orvix_node.protocol import JobChunkMessage, JobMessage, JobResultMessage
 from orvix_node.state import state
@@ -17,14 +24,9 @@ SendFn = Callable[[object], Awaitable[None]]
 
 
 class JobExecutor:
-    def __init__(self, backend: InferenceBackend, max_concurrent: int = 4) -> None:
-        self.backend = backend
+    def __init__(self, manager: ModelManager, max_concurrent: int = 4) -> None:
+        self.manager = manager
         self._sem = asyncio.Semaphore(max_concurrent)
-        self._model: str | None = None
-
-    async def initialize(self, model: str) -> None:
-        await self.backend.initialize(model)
-        self._model = model
 
     async def execute(
         self, job: JobMessage, send_chunk: SendFn, send_result: SendFn
@@ -40,10 +42,11 @@ class JobExecutor:
                 temperature=job.temperature,
             )
 
-            if job.stream:
-                await self._run_streaming(job, req, send_chunk, started)
-            else:
-                await self._run_blocking(job, req, send_result, started)
+            async with self.manager.serving(job.model) as engine:
+                if job.stream:
+                    await self._run_streaming(job, req, engine, send_chunk, started)
+                else:
+                    await self._run_blocking(job, req, engine, send_result, started)
 
         except Exception as exc:  # noqa: BLE001 — report, don't crash the agent
             logger.exception("Job {} failed: {}", job.job_id, exc)
@@ -62,9 +65,14 @@ class JobExecutor:
             self._sem.release()
 
     async def _run_blocking(
-        self, job: JobMessage, req: GenerateRequest, send_result: SendFn, started: float
+        self,
+        job: JobMessage,
+        req: GenerateRequest,
+        engine: ChatEngine,
+        send_result: SendFn,
+        started: float,
     ) -> None:
-        resp = await self.backend.generate(req)
+        resp = await engine.generate(req)
         latency_ms = int((time.perf_counter() - started) * 1000)
         result = {
             "id": f"chatcmpl-{job.job_id}",
@@ -96,11 +104,16 @@ class JobExecutor:
         )
 
     async def _run_streaming(
-        self, job: JobMessage, req: GenerateRequest, send_chunk: SendFn, started: float
+        self,
+        job: JobMessage,
+        req: GenerateRequest,
+        engine: ChatEngine,
+        send_chunk: SendFn,
+        started: float,
     ) -> None:
         prompt_tokens = 0
         completion_tokens = 0
-        async for chunk in self.backend.generate_stream(req):
+        async for chunk in engine.generate_stream(req):
             if chunk.usage is not None:
                 prompt_tokens = chunk.usage.prompt_tokens
                 completion_tokens = chunk.usage.completion_tokens
@@ -136,9 +149,9 @@ class JobExecutor:
         )
 
     async def shutdown(self, timeout: float = 30.0) -> None:
-        """Wait for active jobs to drain, then shut the backend down."""
+        """Wait for active jobs to drain, then unload whatever engine is resident."""
         deadline = time.monotonic() + timeout
         while state.current_jobs and time.monotonic() < deadline:
             logger.info("Waiting for {} active job(s) to finish...", len(state.current_jobs))
             await asyncio.sleep(0.5)
-        await self.backend.shutdown()
+        await self.manager.shutdown()

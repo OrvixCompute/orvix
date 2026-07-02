@@ -1,25 +1,23 @@
 """Abstract inference interfaces + the request/response value objects.
 
 The node runs one or more *engines*. Every engine — chat or image — shares a
-common lifecycle (:class:`AbstractEngine`: load / unload / is_loaded) so a future
-ModelManager (Session 2) can swap them in and out of VRAM uniformly.
+common lifecycle (:class:`AbstractEngine`: ``load(model_id)`` / ``unload`` /
+``is_loaded``) so the :class:`~orvix_node.inference.manager.ModelManager` can
+swap them in and out of VRAM uniformly.
 
 On top of that lifecycle sit two families:
 
-* :class:`ChatEngine` — text generation. It keeps the original
-  ``InferenceBackend`` contract (initialize / is_ready / generate /
-  generate_stream / shutdown) so existing chat behavior is unchanged; the engine
-  lifecycle is bridged onto it.
-* :class:`ImageEngine` — image generation via :meth:`ImageEngine.infer`.
+* :class:`ChatEngine` — text generation (``generate`` / ``generate_stream``).
+* :class:`ImageEngine` — image generation (``infer``).
 
-Swapping chat backends (mock -> vLLM) is still a one-file change because the
-executor only ever talks to the ``InferenceBackend`` contract.
+``load`` takes the orchestrator-facing ``model_id`` so a single engine can serve
+several models later; engines that serve a fixed model may ignore the argument.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, ClassVar, List, Optional, Protocol, runtime_checkable
+from typing import AsyncIterator, ClassVar, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -70,27 +68,13 @@ class ImageResult(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
-# --- Chat backend contract (unchanged) -------------------------------------
-@runtime_checkable
-class InferenceBackend(Protocol):
-    async def initialize(self, model: str) -> None: ...
-
-    async def is_ready(self) -> bool: ...
-
-    async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
-
-    def generate_stream(self, request: GenerateRequest) -> AsyncIterator[GenerateChunk]: ...
-
-    async def shutdown(self) -> None: ...
-
-
 # --- Engine hierarchy ------------------------------------------------------
 class AbstractEngine(ABC):
     """Common lifecycle + capability metadata for every inference engine.
 
     ``engine_type`` ("chat" | "image"), ``required_vram_gb`` and
-    ``supported_models`` describe the engine so the ModelManager (Session 2) and
-    the node's capability advertisement can reason about it without loading it.
+    ``supported_models`` describe the engine so the ModelManager and the node's
+    capability advertisement can reason about it without loading it.
     """
 
     engine_type: ClassVar[str] = ""
@@ -98,8 +82,8 @@ class AbstractEngine(ABC):
     supported_models: ClassVar[List[str]] = []
 
     @abstractmethod
-    async def load(self) -> None:
-        """Bring the model into VRAM. Idempotent: a no-op if already loaded."""
+    async def load(self, model_id: str) -> None:
+        """Bring ``model_id`` into VRAM. Idempotent: a no-op if already loaded."""
 
     @abstractmethod
     async def unload(self) -> None:
@@ -111,24 +95,11 @@ class AbstractEngine(ABC):
 
 
 class ChatEngine(AbstractEngine):
-    """Base for chat/text engines.
-
-    Concrete backends implement the original ``InferenceBackend`` contract; this
-    base bridges the engine lifecycle (load/unload/is_loaded) onto it so chat
-    behavior is identical to before while the ModelManager gets a uniform API.
-    """
+    """Base for chat/text engines. Concrete backends implement the lifecycle
+    (``load`` / ``unload`` / ``is_loaded``) plus ``generate`` /
+    ``generate_stream``."""
 
     engine_type: ClassVar[str] = "chat"
-
-    # Set by concrete backends (VLLMBackend sets it in __init__, MockBackend too).
-    model: Optional[str] = None
-
-    # --- chat contract (implemented by concrete backends) ---
-    @abstractmethod
-    async def initialize(self, model: str) -> None: ...
-
-    @abstractmethod
-    async def is_ready(self) -> bool: ...
 
     @abstractmethod
     async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
@@ -137,19 +108,6 @@ class ChatEngine(AbstractEngine):
     def generate_stream(
         self, request: GenerateRequest
     ) -> AsyncIterator[GenerateChunk]: ...
-
-    @abstractmethod
-    async def shutdown(self) -> None: ...
-
-    # --- engine lifecycle (delegates to the chat contract) ---
-    async def load(self) -> None:
-        await self.initialize(self.model or "")
-
-    async def unload(self) -> None:
-        await self.shutdown()
-
-    async def is_loaded(self) -> bool:
-        return await self.is_ready()
 
 
 class ImageEngine(AbstractEngine):

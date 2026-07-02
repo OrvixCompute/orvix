@@ -48,7 +48,10 @@ class FluxEngine(ImageEngine):
         self.device = device
         self._pipe = None  # diffusers FluxPipeline once loaded
 
-    async def load(self) -> None:
+    async def load(self, model_id: str = "flux-schnell") -> None:
+        # ``model_id`` is the orchestrator-facing catalog id; the upstream repo
+        # is fixed on this engine (self.model_id), so the argument is accepted
+        # for interface uniformity but not otherwise used.
         if self._pipe is not None:
             return
         # Lazy heavy imports — only needed when actually serving on a GPU.

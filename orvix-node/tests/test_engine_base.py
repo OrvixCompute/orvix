@@ -1,8 +1,7 @@
-"""Tests for the engine hierarchy: metadata + the ChatEngine lifecycle bridge.
+"""Tests for the engine hierarchy: metadata + the unified lifecycle.
 
-The lifecycle methods (load/unload/is_loaded) used by the future ModelManager
-must delegate to the existing chat contract (initialize/is_ready/shutdown) so
-chat behavior is unchanged.
+Every engine shares load(model_id)/unload/is_loaded; chat engines add
+generate/generate_stream, image engines add infer.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from orvix_node.inference.base import (
     GenerateChunk,
     GenerateRequest,
     GenerateResponse,
+    ImageEngine,
 )
 from orvix_node.inference.mock import MockBackend
 from orvix_node.inference.vllm import VLLMBackend
@@ -26,15 +26,18 @@ class _RecordingChat(ChatEngine):
 
     def __init__(self):
         self.events: list = []
-        self.model = "m1"
-        self._ready = False
+        self._loaded = False
 
-    async def initialize(self, model: str) -> None:
-        self.events.append(("init", model))
-        self._ready = True
+    async def load(self, model_id: str) -> None:
+        self.events.append(("load", model_id))
+        self._loaded = True
 
-    async def is_ready(self) -> bool:
-        return self._ready
+    async def unload(self) -> None:
+        self.events.append(("unload",))
+        self._loaded = False
+
+    async def is_loaded(self) -> bool:
+        return self._loaded
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse:
         return GenerateResponse(content="", prompt_tokens=0, completion_tokens=0)
@@ -45,29 +48,26 @@ class _RecordingChat(ChatEngine):
         if False:  # pragma: no cover — empty async generator
             yield GenerateChunk()
 
-    async def shutdown(self) -> None:
-        self.events.append(("shutdown",))
-        self._ready = False
 
-
-async def test_chat_lifecycle_delegates_to_contract():
+async def test_chat_lifecycle():
     e = _RecordingChat()
     assert e.engine_type == "chat"
     assert await e.is_loaded() is False
 
-    await e.load()
-    assert ("init", "m1") in e.events
+    await e.load("qwen-2.5-7b")
+    assert ("load", "qwen-2.5-7b") in e.events
     assert await e.is_loaded() is True
 
     await e.unload()
-    assert ("shutdown",) in e.events
+    assert ("unload",) in e.events
     assert await e.is_loaded() is False
 
 
-def test_concrete_engines_are_abstract_engines():
+def test_class_hierarchy():
     assert issubclass(VLLMBackend, ChatEngine)
     assert issubclass(MockBackend, ChatEngine)
     assert issubclass(ChatEngine, AbstractEngine)
+    assert issubclass(ImageEngine, AbstractEngine)
 
 
 def test_vllm_metadata():
@@ -76,10 +76,12 @@ def test_vllm_metadata():
     assert VLLMBackend.supported_models == ["qwen-2.5-7b"]
 
 
-async def test_mock_backend_is_a_chat_engine():
+async def test_mock_backend_lifecycle():
     b = MockBackend("p")
     assert b.engine_type == "chat"
     assert await b.is_loaded() is False
-    await b.initialize("qwen-2.5-7b")
+    await b.load("qwen-2.5-7b")
     assert await b.is_loaded() is True
     assert b.model == "qwen-2.5-7b"
+    await b.unload()
+    assert await b.is_loaded() is False
