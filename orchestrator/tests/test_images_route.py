@@ -10,6 +10,7 @@ from app.database import get_supabase
 from app.dependencies import get_user_from_api_key
 from app.models.protocol import ImageJobCompleteMessage
 from app.routes import images as images_route
+from app.services.holder import holder_service
 from app.services.node_manager import node_manager
 from tests.fakes import FakeSupabase
 
@@ -32,6 +33,15 @@ def client_and_db(tmp_path, monkeypatch):
 
     fastapi_app.dependency_overrides[get_supabase] = lambda: db
     fastapi_app.dependency_overrides[get_user_from_api_key] = fake_user_dep
+
+    # Treat the caller as a holder with the mint configured so the quota gate
+    # allows up to IMAGE_DAILY_LIMIT_HOLDER/day (quota edges are in test_quota).
+    monkeypatch.setattr(settings, "ORVX_MINT_ADDRESS", "MINT1111111111111111111111111111111111")
+
+    async def fake_holder(db_, wallet):
+        return True, 20000.0
+
+    monkeypatch.setattr(holder_service, "get_holder_status", fake_holder)
 
     # Save images into a temp dir and stub the binary fetch (no real node).
     monkeypatch.setattr(settings, "IMAGE_STORAGE_DIR", str(tmp_path))

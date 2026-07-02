@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from supabase import Client
 
 from app.config import settings
@@ -35,6 +36,8 @@ from app.logger import logger
 from app.models.image import ImageGenerationRequest
 from app.models.inference import IMAGE_MODELS
 from app.models.protocol import ImageJobDispatchMessage
+from app.services import quota_service
+from app.services.holder import holder_service
 from app.services.node_manager import NodeTimeoutError, node_manager
 
 router = APIRouter(prefix="/v1", tags=["images"])
@@ -87,8 +90,13 @@ async def images_generations(
         )
     width, height = _parse_size(body.size)
 
-    # TODO(Session 4): enforce the holder image quota here (5/day for holders,
-    # non-holders blocked; 1/day grace when ORVX_MINT_ADDRESS is unset).
+    # Quota gate: holders get IMAGE_DAILY_LIMIT_HOLDER/day; when ORVX_MINT_ADDRESS
+    # is unset, everyone gets the grace fallback. Consumes `n` units up front
+    # (raises 403 not_holder / 429 daily_quota_exceeded).
+    is_holder, balance = await holder_service.get_holder_status(db, user["wallet_address"])
+    quota = quota_service.enforce_image_quota(
+        db, user["wallet_address"], is_holder, balance, units=body.n
+    )
 
     node = node_manager.select_image_node(body.model)
     if node is None:
@@ -145,7 +153,13 @@ async def images_generations(
         else:
             data.append({"url": public_url, "revised_prompt": None})
 
-    return {"created": created, "data": data}
+    return JSONResponse(
+        content={"created": created, "data": data},
+        headers={
+            "X-Orvix-Quota-Remaining": str(quota["remaining"]),
+            "X-Orvix-Quota-Reset": quota["reset_at"],
+        },
+    )
 
 
 def _record_image_job(

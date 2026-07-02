@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Node binary endpoint `GET /v1/binary/image/<id>` (per-job `X-Node-Secret` token, stream-then-delete) + node image job handler
 - Node manager reads node capabilities and routes image jobs only to image-capable nodes
 - Migrations `010_image_jobs`, `011_node_capabilities`; config `IMAGE_JOB_TIMEOUT`, `IMAGE_STORAGE_DIR`, `PUBLIC_IMAGE_URL_BASE`; node config `image_tmp_dir`, `binary_public_url`
+- **Quota system:** holder verification (`holder.py`, 15-min cached ORVX balance) + `quota_service`; chat free tier (2 lifetime for non-holders, then pay-or-402), image daily limits (5/day holders; 1/day grace for everyone when `ORVX_MINT_ADDRESS` unset; non-holders 403 when the mint is set; 429 over limit, resets 00:00 UTC). `GET /v1/account/quota`, quota response headers on chat/images. Migration `012_quotas`; config `ORVX_HOLDER_THRESHOLD`, `CHAT_LIFETIME_FREE_LIMIT`, `IMAGE_DAILY_LIMIT_HOLDER`, `IMAGE_DAILY_LIMIT_FALLBACK`, `HOLDER_CACHE_TTL_MINUTES`, `UPGRADE_URL`, `TOKENOMICS_URL`
 
 ### Changed
 - Unified engine lifecycle to `load(model_id)` / `unload` / `is_loaded` across all engines (renamed from `initialize`/`is_ready`/`shutdown`)

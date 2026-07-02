@@ -105,6 +105,29 @@ class Settings(BaseSettings):
         "", description="If set, buyback/burn executions are appended to dated files here"
     )
 
+    # --- Quotas / holder gating --------------------------------------------
+    ORVX_HOLDER_THRESHOLD: int = Field(
+        10000, description="Minimum ORVX balance to count as a holder"
+    )
+    CHAT_LIFETIME_FREE_LIMIT: int = Field(
+        2, description="Free lifetime chat requests for non-holders"
+    )
+    IMAGE_DAILY_LIMIT_HOLDER: int = Field(
+        5, description="Daily image generations for holders (resets 00:00 UTC)"
+    )
+    IMAGE_DAILY_LIMIT_FALLBACK: int = Field(
+        1, description="Daily image generations for everyone when ORVX_MINT_ADDRESS is unset"
+    )
+    HOLDER_CACHE_TTL_MINUTES: int = Field(
+        15, description="How long a holder-status lookup is cached"
+    )
+    UPGRADE_URL: str = Field(
+        "https://orvix.network/pricing", description="Shown when a quota is exhausted"
+    )
+    TOKENOMICS_URL: str = Field(
+        "https://orvix.network/tokenomics", description="Shown when image access needs ORVX"
+    )
+
     # --- Image generation --------------------------------------------------
     IMAGE_JOB_TIMEOUT: int = Field(
         90, description="Seconds to wait for a node to complete an image job"
