@@ -105,6 +105,18 @@ class Settings(BaseSettings):
         "", description="If set, buyback/burn executions are appended to dated files here"
     )
 
+    # --- Image generation --------------------------------------------------
+    IMAGE_JOB_TIMEOUT: int = Field(
+        90, description="Seconds to wait for a node to complete an image job"
+    )
+    IMAGE_STORAGE_DIR: str = Field(
+        "/var/orvix/images", description="Local dir where generated images are saved"
+    )
+    PUBLIC_IMAGE_URL_BASE: str = Field(
+        "https://orvix.network/images",
+        description="Public base URL that maps to IMAGE_STORAGE_DIR (served by nginx)",
+    )
+
     # --- Governance (Snapshot.org) -----------------------------------------
     GOVERNANCE_SNAPSHOT_SPACE: str = Field(
         "orvix", description="Snapshot space slug for ORVX governance"

@@ -4,8 +4,19 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-# Models supported by the (currently mocked) inference layer.
+# Chat models supported by the inference layer.
 SUPPORTED_MODELS = ("qwen-2.5-7b", "mistral-7b", "llama-3.1-8b-quantized")
+
+# Image models supported via the /v1/images/generations endpoint.
+IMAGE_MODELS = ("flux-schnell",)
+
+# Public model catalog served by GET /v1/models.
+MODEL_CATALOG = [
+    {"id": "qwen-2.5-7b", "type": "chat", "context_window": 32768},
+    {"id": "mistral-7b", "type": "chat", "context_window": 32768},
+    {"id": "llama-3.1-8b-quantized", "type": "chat", "context_window": 8192},
+    {"id": "flux-schnell", "type": "image", "max_size": "1536x1536"},
+]
 
 
 class ChatMessage(BaseModel):

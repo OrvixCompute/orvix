@@ -62,6 +62,12 @@ class NodeConfig(BaseModel):
     vllm_managed: bool = False
     # Unload the resident engine after this many idle minutes to free VRAM.
     idle_unload_minutes: int = 10
+    # Where generated images are written before the orchestrator fetches them.
+    image_tmp_dir: str = "/tmp/node-images"
+    # Externally reachable base URL for this node's binary endpoint (the
+    # orchestrator fetches images from here). Falls back to the local health
+    # server when empty (dev only — not reachable from a remote orchestrator).
+    binary_public_url: str = ""
 
     def masked(self) -> dict:
         """Config as a dict with secrets masked, for display."""

@@ -104,7 +104,13 @@ async def _run_agent(cfg) -> None:
     manager = ModelManager(
         engines, idle_timeout_seconds=cfg.idle_unload_minutes * 60
     )
-    executor = JobExecutor(manager, max_concurrent=cfg.max_concurrent_jobs)
+    binary_base_url = cfg.binary_public_url or f"http://127.0.0.1:{cfg.health_port}"
+    executor = JobExecutor(
+        manager,
+        max_concurrent=cfg.max_concurrent_jobs,
+        image_tmp_dir=cfg.image_tmp_dir,
+        binary_base_url=binary_base_url,
+    )
 
     # Pre-warm the chat engine so the first request isn't slowed by a cold load.
     async with manager.serving(cfg.model):
@@ -131,7 +137,13 @@ async def _run_agent(cfg) -> None:
             job, send_chunk=client.send_message, send_result=client.send_message
         )
 
+    async def image_handler(dispatch) -> None:
+        await executor.execute_image(
+            dispatch, send_complete=client.send_message, send_failed=client.send_message
+        )
+
     client.set_job_handler(job_handler)
+    client.set_image_handler(image_handler)
 
     # Graceful shutdown on SIGINT/SIGTERM.
     loop = asyncio.get_running_loop()

@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Managed vLLM mode (`vllm_managed`): the node owns the vLLM server as a subprocess so `unload()` actually frees VRAM for the image engine (start on load, kill on unload)
 - Node `/v1/status` endpoint: current engine, VRAM free/total, uptime, active jobs
 - Config: `vllm_managed`, `idle_unload_minutes`
+- **Image generation (orchestrator):** `POST /v1/images/generations` (OpenAI DALL-E-compatible) — dispatches to an image-capable node, fetches the PNG from the node's binary endpoint, saves it, returns URL/b64
+- `GET /v1/models` catalog endpoint (chat + `flux-schnell` image model)
+- Protocol messages `job.image.dispatch` / `job.image.complete` / `job.image.failed`; `RegisterMessage` gains optional `engines[]` + `vram_gb`
+- Node binary endpoint `GET /v1/binary/image/<id>` (per-job `X-Node-Secret` token, stream-then-delete) + node image job handler
+- Node manager reads node capabilities and routes image jobs only to image-capable nodes
+- Migrations `010_image_jobs`, `011_node_capabilities`; config `IMAGE_JOB_TIMEOUT`, `IMAGE_STORAGE_DIR`, `PUBLIC_IMAGE_URL_BASE`; node config `image_tmp_dir`, `binary_public_url`
 
 ### Changed
 - Unified engine lifecycle to `load(model_id)` / `unload` / `is_loaded` across all engines (renamed from `initialize`/`is_ready`/`shutdown`)

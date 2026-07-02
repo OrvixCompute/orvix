@@ -5,17 +5,21 @@ from typing import AsyncIterator
 
 import pytest
 
+from orvix_node import binary
 from orvix_node.executor import JobExecutor
 from orvix_node.inference.base import (
     ChatEngine,
     GenerateChunk,
     GenerateRequest,
     GenerateResponse,
+    ImageEngine,
+    ImageRequest,
+    ImageResult,
     GenerateUsage,
 )
 from orvix_node.inference.manager import ModelManager
 from orvix_node.inference.mock import MockBackend
-from orvix_node.protocol import JobMessage
+from orvix_node.protocol import ImageJobDispatchMessage, JobMessage
 from orvix_node.state import state
 
 
@@ -152,3 +156,53 @@ async def test_shutdown_waits_for_active_jobs():
     await ex.shutdown(timeout=5)
     assert len(state.current_jobs) == 0
     await job_task
+
+
+# --- image jobs ------------------------------------------------------------
+class FakeImageEngine(ImageEngine):
+    def __init__(self):
+        self._loaded = False
+
+    async def load(self, model_id): self._loaded = True
+    async def unload(self): self._loaded = False
+    async def is_loaded(self): return self._loaded
+
+    async def infer(self, request: ImageRequest) -> ImageResult:
+        return ImageResult(png_bytes=b"IMGDATA", metadata={"seed": request.seed})
+
+
+def _image_dispatch(job_id="ij1"):
+    return ImageJobDispatchMessage(
+        job_id=job_id, model="flux-schnell", prompt="a cat", binary_token="tok"
+    )
+
+
+async def test_execute_image_success(tmp_path):
+    binary._registry.clear()
+    mgr = ModelManager({"image": FakeImageEngine()})
+    ex = JobExecutor(mgr, image_tmp_dir=str(tmp_path), binary_base_url="http://node:9000")
+    completes, fails = Collector(), Collector()
+
+    await ex.execute_image(_image_dispatch(), send_complete=completes, send_failed=fails)
+
+    assert len(fails.messages) == 0
+    assert len(completes.messages) == 1
+    msg = completes.messages[0]
+    assert msg.type == "job.image.complete"
+    assert msg.binary_url == f"http://node:9000/v1/binary/image/{msg.image_id}"
+    # File written and registered under the dispatch token for the binary fetch.
+    assert (tmp_path / f"{msg.image_id}.png").read_bytes() == b"IMGDATA"
+    assert binary._registry[msg.image_id]["token"] == "tok"
+
+
+async def test_execute_image_no_engine_fails(tmp_path):
+    # Manager has no image engine -> acquire raises -> failure reported.
+    mgr = ModelManager({"chat": MockBackend("p")})
+    ex = JobExecutor(mgr, image_tmp_dir=str(tmp_path), binary_base_url="http://n:9000")
+    completes, fails = Collector(), Collector()
+
+    await ex.execute_image(_image_dispatch(), send_complete=completes, send_failed=fails)
+
+    assert len(completes.messages) == 0
+    assert len(fails.messages) == 1
+    assert fails.messages[0].type == "job.image.failed"

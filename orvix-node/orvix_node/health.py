@@ -17,7 +17,10 @@ from orvix_node.version import __version__
 
 
 def create_health_app(manager: Optional["object"] = None) -> FastAPI:
+    from orvix_node.binary import create_binary_router
+
     app = FastAPI(title="Orvix Node", version=__version__)
+    app.include_router(create_binary_router())
 
     @app.get("/health")
     async def health() -> dict:
