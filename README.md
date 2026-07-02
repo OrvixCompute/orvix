@@ -33,7 +33,7 @@ open, community-owned inference with no vendor lock-in.
 ## Architecture overview
 
 ```
-┌─────────────┐      OpenAI-compatible       ┌──────────────┐      WebSocket       ┌──────────────┐
+┌─────────────┐      OpenAI-compatible       ┌──────────────┐      WebSocket      ┌──────────────┐
 │  Developer  │ ───────────  HTTPS  ───────▶ │ Orchestrator │ ─────────────────▶  │   Node(s)    │
 │  (API call) │ ◀──────────  response  ───── │   (FastAPI)  │ ◀─────────────────  │  (GPU agent) │
 └─────────────┘                              └──────────────┘                     └──────────────┘
