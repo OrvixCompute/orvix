@@ -139,6 +139,9 @@ class Settings(BaseSettings):
         "https://orvix.network/images",
         description="Public base URL that maps to IMAGE_STORAGE_DIR (served by nginx)",
     )
+    MAX_IMAGE_STORAGE_MB: int = Field(
+        5000, description="Refuse new image jobs when IMAGE_STORAGE_DIR exceeds this size"
+    )
 
     # --- Governance (Snapshot.org) -----------------------------------------
     GOVERNANCE_SNAPSHOT_SPACE: str = Field(

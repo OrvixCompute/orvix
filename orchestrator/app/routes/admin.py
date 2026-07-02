@@ -16,6 +16,7 @@ from app.models.admin import (
     BuybackExecuteRequest,
     BuybackExecuteResponse,
 )
+from app.services import storage_service
 from app.services.burn_service import BurnService
 from app.services.buyback_service import BuybackService
 
@@ -70,3 +71,11 @@ async def burn_execute(
         body.amount, body.period_start, body.period_end, _executor()
     )
     return BurnExecuteResponse(**result)
+
+
+@router.get("/storage/stats")
+async def storage_stats():
+    """Image storage usage for disk monitoring (admin-only)."""
+    data = storage_service.stats()
+    data["cleanup_schedule"] = "hourly (orvix-image-cleanup.timer)"
+    return data

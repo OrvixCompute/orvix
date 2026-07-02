@@ -7,6 +7,7 @@ from supabase import Client
 
 from app.database import get_supabase
 from app.dependencies import get_current_user
+from app.logger import logger
 from app.models.billing import TierResponse
 from app.services import quota_service, tier_service
 from app.services.holder import holder_service
@@ -38,4 +39,25 @@ async def get_quota(
     """Current chat + image quota status for the authenticated wallet."""
     wallet = current_user["wallet_address"]
     is_holder, balance = await holder_service.get_holder_status(db, wallet)
-    return quota_service.quota_status(db, wallet, is_holder, balance)
+    status = quota_service.quota_status(db, wallet, is_holder, balance)
+
+    # Recent images (most recent first) so the user can see what they generated
+    # before the 24h auto-delete removes them.
+    try:
+        recent = (
+            db.table("image_jobs")
+            .select("image_url,created_at,expires_at")
+            .eq("user_id", current_user["id"])
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        status["image"]["generated_images_last_24h"] = [
+            {"url": r["image_url"], "created_at": r["created_at"], "expires_at": r["expires_at"]}
+            for r in (recent.data or [])
+        ]
+    except Exception as exc:  # noqa: BLE001 — recent-images list is best-effort
+        logger.warning("Failed to load recent images for {}: {}", wallet, exc)
+        status["image"]["generated_images_last_24h"] = []
+
+    return status

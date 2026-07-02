@@ -127,6 +127,19 @@ async def _run_agent(cfg) -> None:
 
     idle_task = asyncio.create_task(_idle_loop(), name="idle-check")
 
+    # Background task: remove leftover image temp files (>1h old).
+    async def _sweep_loop() -> None:
+        from orvix_node.binary import sweep_temp_dir
+
+        while True:
+            await asyncio.sleep(600)
+            try:
+                sweep_temp_dir(cfg.image_tmp_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Temp sweep failed: {}", exc)
+
+    sweep_task = asyncio.create_task(_sweep_loop(), name="temp-sweep")
+
     health = HealthServer(cfg.health_port, manager=manager)
     await health.start()
 
@@ -168,6 +181,7 @@ async def _run_agent(cfg) -> None:
     # Drain & shut down.
     await client.stop()
     idle_task.cancel()
+    sweep_task.cancel()
     await executor.shutdown()
     await health.stop()
     if client_task in done and client_task.exception():

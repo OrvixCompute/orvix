@@ -89,6 +89,14 @@ class _Query:
         self._filters.append((c, "gte", v))
         return self
 
+    def lt(self, c, v):
+        self._filters.append((c, "lt", v))
+        return self
+
+    def lte(self, c, v):
+        self._filters.append((c, "lte", v))
+        return self
+
     def in_(self, c, values):
         self._filters.append((c, "in", list(values)))
         return self
@@ -120,6 +128,10 @@ class _Query:
             if op == "gt" and not (cell is not None and cell > v):
                 return False
             if op == "gte" and not (cell is not None and cell >= v):
+                return False
+            if op == "lt" and not (cell is not None and cell < v):
+                return False
+            if op == "lte" and not (cell is not None and cell <= v):
                 return False
             if op == "in" and cell not in v:
                 return False

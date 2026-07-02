@@ -234,3 +234,25 @@ Liveness probe. No auth required.
 
 ### `GET /v1`
 API root / version info. No auth required.
+
+## Image generation
+
+`POST /v1/images/generations` — OpenAI DALL-E-compatible. Auth: `Authorization:
+Bearer orvx_sk_...`.
+
+```bash
+curl -X POST https://api.orvix.network/v1/images/generations \
+  -H "Authorization: Bearer orvx_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"model": "flux-schnell", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'
+```
+
+Request: `model` (`flux-schnell`), `prompt`, `n` (1–4), `size`
+(`256x256`…`1536x1536`), `response_format` (`url` | `b64_json`).
+
+Response: `{"created": ..., "data": [{"url": "https://orvix.network/images/<id>.png"}]}`.
+Quota headers: `X-Orvix-Quota-Remaining`, `X-Orvix-Quota-Reset`.
+
+> ⚠️ **Images are auto-deleted after 24 hours.** Download and save anything you
+> want to keep. Quota rules: holders get 5 images/day; during alpha (no ORVX mint
+> configured) everyone gets 1/day. See `GET /v1/account/quota` for current status.

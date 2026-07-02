@@ -16,6 +16,7 @@ from supabase import Client
 
 from app.config import settings
 from app.exceptions import OrvixException
+from app.logger import logger
 
 
 def _today_iso() -> str:
@@ -153,6 +154,28 @@ def enforce_image_quota(
         )
     _bump_image(db, wallet, day, units)
     return {"remaining": daily_limit - (used + units), "reset_at": _next_midnight_iso(), "limit": daily_limit}
+
+
+def refund_image_quota(db: Client, wallet: str, units: int) -> None:
+    """Give back `units` of today's image quota (e.g. after a generation failure)."""
+    if units <= 0:
+        return
+    day = _today_iso()
+    existing = (
+        db.table("image_quota_usage")
+        .select("count")
+        .eq("wallet_address", wallet)
+        .eq("usage_date", day)
+        .limit(1)
+        .execute()
+    )
+    if not existing.data:
+        return
+    new_count = max(0, int(existing.data[0]["count"]) - units)
+    db.table("image_quota_usage").update({"count": new_count}).eq(
+        "wallet_address", wallet
+    ).eq("usage_date", day).execute()
+    logger.info("Refunded {} image quota unit(s) to {}", units, wallet)
 
 
 # --- status (for GET /v1/account/quota) ------------------------------------

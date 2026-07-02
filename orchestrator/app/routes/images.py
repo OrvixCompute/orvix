@@ -36,7 +36,7 @@ from app.logger import logger
 from app.models.image import ImageGenerationRequest
 from app.models.inference import IMAGE_MODELS
 from app.models.protocol import ImageJobDispatchMessage
-from app.services import quota_service
+from app.services import quota_service, storage_service
 from app.services.holder import holder_service
 from app.services.node_manager import NodeTimeoutError, node_manager
 
@@ -90,6 +90,14 @@ async def images_generations(
         )
     width, height = _parse_size(body.size)
 
+    # Storage safety cap — refuse before consuming quota when the disk is full.
+    if storage_service.current_size_mb() > settings.MAX_IMAGE_STORAGE_MB:
+        raise OrvixException(
+            "Image storage is temporarily full. Cleanup in progress.",
+            error_code="storage_full",
+            status_code=503,
+        )
+
     # Quota gate: holders get IMAGE_DAILY_LIMIT_HOLDER/day; when ORVX_MINT_ADDRESS
     # is unset, everyone gets the grace fallback. Consumes `n` units up front
     # (raises 403 not_holder / 429 daily_quota_exceeded).
@@ -100,6 +108,8 @@ async def images_generations(
 
     node = node_manager.select_image_node(body.model)
     if node is None:
+        # No node ever ran — refund the units we just consumed.
+        quota_service.refund_image_quota(db, user["wallet_address"], body.n)
         raise OrvixException(
             "No image providers are currently available",
             error_code="no_image_provider",
@@ -108,50 +118,66 @@ async def images_generations(
 
     created = int(time.time())
     data: list[dict] = []
-    for _ in range(body.n):
-        job_id = str(uuid.uuid4())
-        binary_token = secrets.token_urlsafe(32)
-        dispatch = ImageJobDispatchMessage(
-            job_id=job_id,
-            model=body.model,
-            prompt=body.prompt,
-            width=width,
-            height=height,
-            binary_token=binary_token,
-        )
-        try:
-            complete = await node_manager.dispatch_image_job(node, dispatch)
-        except NodeTimeoutError as exc:
-            raise OrvixException(
-                f"Image node did not respond in time: {exc}",
-                error_code="node_timeout",
-                status_code=504,
-            ) from exc
-        except RuntimeError as exc:
-            raise OrvixException(
-                f"Image node failed to generate: {exc}",
-                error_code="node_error",
-                status_code=502,
-            ) from exc
+    produced = 0
+    try:
+        for _ in range(body.n):
+            job_id = str(uuid.uuid4())
+            binary_token = secrets.token_urlsafe(32)
+            dispatch = ImageJobDispatchMessage(
+                job_id=job_id,
+                model=body.model,
+                prompt=body.prompt,
+                width=width,
+                height=height,
+                binary_token=binary_token,
+            )
+            try:
+                complete = await node_manager.dispatch_image_job(node, dispatch)
+            except NodeTimeoutError as exc:
+                raise OrvixException(
+                    f"Image node did not respond in time: {exc}",
+                    error_code="node_timeout",
+                    status_code=504,
+                ) from exc
+            except RuntimeError as exc:
+                raise OrvixException(
+                    f"Image node failed to generate: {exc}",
+                    error_code="node_error",
+                    status_code=502,
+                ) from exc
 
-        png_bytes = await _fetch_image_bytes(complete.binary_url, binary_token)
-        _filename, public_url = _save_image(png_bytes)
+            try:
+                png_bytes = await _fetch_image_bytes(complete.binary_url, binary_token)
+            except httpx.HTTPError as exc:
+                raise OrvixException(
+                    f"Failed to fetch image from node: {exc}",
+                    error_code="node_error",
+                    status_code=502,
+                ) from exc
 
-        _record_image_job(
-            db,
-            user_id=user["id"],
-            provider_id=node.provider_id,
-            model=body.model,
-            prompt=body.prompt,
-            width=width,
-            height=height,
-            image_url=public_url,
-        )
+            _filename, public_url = _save_image(png_bytes)
+            _record_image_job(
+                db,
+                user_id=user["id"],
+                provider_id=node.provider_id,
+                model=body.model,
+                prompt=body.prompt,
+                width=width,
+                height=height,
+                image_url=public_url,
+            )
+            produced += 1
 
-        if body.response_format == "b64_json":
-            data.append({"b64_json": base64.b64encode(png_bytes).decode(), "revised_prompt": None})
-        else:
-            data.append({"url": public_url, "revised_prompt": None})
+            if body.response_format == "b64_json":
+                data.append({"b64_json": base64.b64encode(png_bytes).decode(), "revised_prompt": None})
+            else:
+                data.append({"url": public_url, "revised_prompt": None})
+    except Exception:
+        # Refund the units that never produced an image, then re-raise.
+        unproduced = body.n - produced
+        if unproduced > 0:
+            quota_service.refund_image_quota(db, user["wallet_address"], unproduced)
+        raise
 
     return JSONResponse(
         content={"created": created, "data": data},
