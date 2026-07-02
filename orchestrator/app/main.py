@@ -1,11 +1,31 @@
 """FastAPI application entrypoint for the Orvix Orchestrator."""
 
+import logging
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 from app import __version__
 from app.config import settings
+
+# Initialize Sentry before the app is created so instrumentation wraps it.
+# No-op when SENTRY_DSN is empty (the default), so local/dev runs stay clean.
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.ENVIRONMENT,
+        release=f"orvix-orchestrator@{__version__}",
+        integrations=[
+            FastApiIntegration(),
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+        profiles_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+        send_default_pii=False,  # never ship wallet addresses / request bodies
+    )
 from app.database import test_connection
 from app.exceptions import register_exception_handlers
 from app.logger import configure_logging, logger

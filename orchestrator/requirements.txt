@@ -28,6 +28,9 @@ tiktoken==0.13.0
 # --- Solana payment listener (Prompt 6) ---
 httpx==0.28.1
 
+# --- Observability ---
+sentry-sdk[fastapi]==2.64.0
+
 # --- Migrations (scripts/migrate.py) ---
 psycopg2-binary==2.9.10
 

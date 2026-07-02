@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field("INFO", description="Loguru log level")
     CORS_ORIGINS: str = Field("*", description="Comma-separated list of allowed CORS origins")
 
+    # --- Observability (optional) ------------------------------------------
+    SENTRY_DSN: str = Field(
+        "", description="Sentry DSN for error tracking; disabled when empty"
+    )
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(
+        0.1, description="Fraction of transactions traced by Sentry (0.0–1.0)"
+    )
+
     # --- Auth --------------------------------------------------------------
     JWT_ALGORITHM: str = Field("HS256", description="JWT signing algorithm")
     JWT_EXPIRY_HOURS: int = Field(24, description="JWT lifetime in hours")

@@ -1,11 +1,25 @@
 """Custom exception hierarchy and the FastAPI handlers that render them as JSON."""
 
+import sentry_sdk
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.logger import logger
+
+
+def _report_to_sentry(request: Request, exc: Exception) -> None:
+    """Send an unexpected/server error to Sentry with request context.
+
+    A no-op when Sentry is not initialized (empty SENTRY_DSN). Client errors
+    (4xx OrvixException subclasses) are expected business logic and are never
+    reported here.
+    """
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("request_id", getattr(request.state, "request_id", None))
+        scope.set_tag("path", request.url.path)
+        sentry_sdk.capture_exception(exc)
 
 
 class OrvixException(Exception):
@@ -92,6 +106,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         # 5xx errors are unexpected — log with traceback; 4xx are client errors.
         if exc.status_code >= 500:
             logger.opt(exception=exc).error("OrvixException: {}", exc.message)
+            _report_to_sentry(request, exc)
         else:
             logger.warning("{} ({}): {}", exc.error_code, exc.status_code, exc.message)
         return JSONResponse(
@@ -117,6 +132,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
         logger.opt(exception=exc).error("Unhandled exception: {}", exc)
+        _report_to_sentry(request, exc)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=_error_body(request, "internal_error", "An internal error occurred"),
