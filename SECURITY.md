@@ -10,7 +10,7 @@ transparency.
 
 Report security issues privately through one of:
 
-- **Email:** security@orvix.xyz
+- **Email:** security@orvix.network
 - **GitHub Security Advisories:** https://github.com/OrvixCompute/orvix/security/advisories/new
 - **Encrypted contact:** PGP key available on request
 

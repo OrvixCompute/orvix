@@ -24,8 +24,8 @@ open, community-owned inference with no vendor lock-in.
 
 ## ⚡ Quick links
 
-- 🌐 Website — https://orvix.xyz *(placeholder)*
-- 📚 Documentation — https://docs.orvix.xyz *(placeholder)*
+- 🌐 Website — https://orvix.network *(placeholder)*
+- 📚 Documentation — https://docs.orvix.network *(placeholder)*
 - 🧩 API reference — [orchestrator/README.md](orchestrator/README.md)
 - 📄 Whitepaper — *coming soon*
 - 💬 [Discord](https://discord.gg/orvix) · [Twitter](https://twitter.com/OrvixCompute) · [Telegram](https://t.me/orvix)
@@ -66,7 +66,7 @@ orvix/
 **For developers (use the API):** create an API key, then call the OpenAI-compatible endpoint.
 
 ```bash
-curl https://api.orvix.xyz/v1/chat/completions \
+curl https://api.orvix.network/v1/chat/completions \
   -H "Authorization: Bearer orvx_sk_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{
@@ -78,7 +78,7 @@ curl https://api.orvix.xyz/v1/chat/completions \
 **For providers (run a node):**
 
 ```bash
-curl -fsSL https://get.orvix.xyz | sh   # placeholder install script
+curl -fsSL https://get.orvix.network | sh   # placeholder install script
 orvix-node start
 ```
 
@@ -103,6 +103,36 @@ staking (25k ORVX minimum), stake-based pricing tiers, a 70/30 revenue split fee
 tooling, and Snapshot-based governance. On-chain buyback/burn execution is stub-gated
 pending devnet testing. Real GPU inference (vLLM) and a public deployment are the next
 milestones. See [CHANGELOG.md](CHANGELOG.md) and [docs/tokenomics.md](docs/tokenomics.md).
+
+## ⚠️ Alpha state disclosures
+
+**This is alpha software. Do not use it for production workloads or with funds you
+cannot afford to lose.** We would rather be upfront about what is *not* yet real than
+have early users discover it the hard way. As of this release:
+
+- **On-chain money movement is stubbed.** Provider **payouts**, ORVX **buyback**
+  (Jupiter swaps), and monthly **burn** all run behind stub flags (`PAYOUT_STUB`,
+  `BUYBACK_STUB`, `BURN_STUB`, default `true`). The accounting and workflows are
+  implemented and tested, but no real SPL transfers are executed yet — they emit
+  simulated transaction signatures. Real execution lands after devnet testing.
+- **The system is custodial, not trustless.** Staking, payouts, and treasury flows
+  are settled off-chain by an operator-controlled treasury wallet against the database.
+  **There is no on-chain program (no Solana/Anchor smart contract) yet**, so there are
+  no on-chain guarantees, escrow, or automated enforcement.
+- **No on-chain slashing or output verification.** The network does not yet
+  cryptographically verify that a node returned honest inference results, and there is
+  no slashing/dispute mechanism. Provider trust is currently operational, not enforced.
+- **Staking is disabled for alpha** (`REQUIRE_STAKE_FOR_PROVIDER=false`). It activates
+  ahead of the public testnet.
+- **ORVX mint is not yet wired in-app.** The on-chain mint address is added when the
+  payout implementation lands.
+- **Single-process scale.** Auth challenge nonces and API rate limits are held
+  in-memory, so the orchestrator runs as a single worker for now. Multi-worker /
+  horizontal scaling (Redis-backed state) comes when real traffic warrants it.
+- **Endpoints and links are placeholders.** `orvix.network`, `docs.orvix.network`, and the
+  `get.orvix.network` install script are not live yet.
+
+Expect breaking changes. Track progress in [CHANGELOG.md](CHANGELOG.md).
 
 ## 📖 Documentation
 

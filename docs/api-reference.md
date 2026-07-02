@@ -20,7 +20,7 @@ authentication:
 Get a challenge string to sign with your Solana wallet. No auth required.
 
 ```bash
-curl "https://api.orvix.xyz/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
+curl "https://api.orvix.network/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
 ```
 
 ```json
@@ -31,7 +31,7 @@ curl "https://api.orvix.xyz/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
 Verify the signed challenge and receive a JWT. No auth required.
 
 ```bash
-curl -X POST https://api.orvix.xyz/v1/auth/verify \
+curl -X POST https://api.orvix.network/v1/auth/verify \
   -H "Content-Type: application/json" \
   -d '{ "wallet": "YOUR_WALLET_ADDRESS", "signature": "BASE58_SIGNATURE" }'
 ```
@@ -44,7 +44,7 @@ curl -X POST https://api.orvix.xyz/v1/auth/verify \
 Return the current authenticated user. **Auth: JWT.**
 
 ```bash
-curl -X POST https://api.orvix.xyz/v1/auth/me \
+curl -X POST https://api.orvix.network/v1/auth/me \
   -H "Authorization: Bearer <JWT>"
 ```
 
@@ -58,7 +58,7 @@ All require **Auth: JWT.**
 Create a new API key. The full key is returned **once** — store it securely.
 
 ```bash
-curl -X POST https://api.orvix.xyz/v1/api-keys \
+curl -X POST https://api.orvix.network/v1/api-keys \
   -H "Authorization: Bearer <JWT>" \
   -H "Content-Type: application/json" \
   -d '{ "name": "my-app" }'
@@ -85,7 +85,7 @@ Revoke the old secret and issue a new one for the same key record.
 Run a chat completion. **Auth: API key.**
 
 ```bash
-curl https://api.orvix.xyz/v1/chat/completions \
+curl https://api.orvix.network/v1/chat/completions \
   -H "Authorization: Bearer orvx_sk_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{

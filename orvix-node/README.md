@@ -16,7 +16,7 @@ Real GPU inference (vLLM) is a one-file swap once you have a CUDA GPU (Prompt 7)
 
 **One-line (Linux providers):**
 ```bash
-curl -sSL https://get.orvix.xyz/node | bash
+curl -sSL https://get.orvix.network/node | bash
 ```
 
 **Manual (development, any OS):**

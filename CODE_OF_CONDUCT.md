@@ -58,7 +58,7 @@ account, or acting as an appointed representative at an online or offline event.
 ### Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the
-community leaders responsible for enforcement at **conduct@orvix.xyz** (or DM
+community leaders responsible for enforcement at **conduct@orvix.network** (or DM
 **@OrvixCompute** on Twitter). All complaints will be reviewed and investigated promptly and
 fairly.
 
