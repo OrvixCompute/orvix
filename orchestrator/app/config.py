@@ -151,6 +151,32 @@ class Settings(BaseSettings):
         5000, description="Refuse new image jobs when IMAGE_STORAGE_DIR exceeds this size"
     )
 
+    # --- Treasury architecture (cold/hot/payout) ---------------------------
+    # TREASURY_WALLET_ADDRESS (above) is the HOT wallet: it receives incoming
+    # USDC deposits and the payment listener subscribes to it. Do NOT reroute it.
+    # TREASURY_KEYPAIR_PATH (above) is the HOT wallet's keypair file.
+    TREASURY_MAIN_PUBLIC: str = Field(
+        "", description="Cold-storage (main) wallet public key; private key stays OFFLINE"
+    )
+    PAYOUT_WALLET_PUBLIC: str = Field(
+        "", description="Payout signer wallet public key"
+    )
+    PAYOUT_KEYPAIR_PATH: str = Field(
+        "", description="Path to the payout signer keypair file (chmod 600); used by Session 3 payouts"
+    )
+    HOT_SWEEP_THRESHOLD_USDC: float = Field(
+        100.0, description="Sweep hot->main once the hot USDC balance exceeds this"
+    )
+    HOT_SWEEP_MIN_KEEP_USDC: float = Field(
+        10.0, description="Always leave at least this much USDC in the hot wallet as an operational buffer"
+    )
+    TREASURY_SWEEP_STUB: bool = Field(
+        True, description="Simulate the hot->main sweep instead of sending a real transfer"
+    )
+    ENABLE_HOT_SWEEPER: bool = Field(
+        False, description="Start the daily hot-wallet sweeper (usually run via systemd timer instead)"
+    )
+
     # --- Governance (Snapshot.org) -----------------------------------------
     GOVERNANCE_SNAPSHOT_SPACE: str = Field(
         "orvix", description="Snapshot space slug for ORVX governance"
