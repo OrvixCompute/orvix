@@ -7,5 +7,8 @@ Type=oneshot
 # pydantic-settings loads .env from the working directory, so no EnvironmentFile
 # is needed as long as /opt/orvix/orchestrator/.env exists.
 WorkingDirectory=/opt/orvix/orchestrator
+# WorkingDirectory is NOT on sys.path when running a script by path, so make the
+# app package importable (cleanup_images.py does `from app.config import ...`).
+Environment=PYTHONPATH=/opt/orvix/orchestrator
 ExecStart=/opt/orvix/orchestrator/.venv/bin/python scripts/cleanup_images.py
 User=root
