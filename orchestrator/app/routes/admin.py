@@ -19,6 +19,8 @@ from app.models.admin import (
 from app.services import storage_service
 from app.services.burn_service import BurnService
 from app.services.buyback_service import BuybackService
+from app.services.hot_sweeper import hot_sweeper
+from app.services.wallet import wallet_service
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -79,3 +81,25 @@ async def storage_stats():
     data = storage_service.stats()
     data["cleanup_schedule"] = "hourly (orvix-image-cleanup.timer)"
     return data
+
+
+# --- Treasury (cold/hot/payout) --------------------------------------------
+
+@router.get("/treasury/balances")
+async def treasury_balances(db: Client = Depends(get_supabase)):
+    """Last-synced treasury balances from the DB (call /treasury/sync to refresh)."""
+    res = db.table("treasury_wallets").select("*").execute()
+    return {"wallets": res.data or []}
+
+
+@router.post("/treasury/sync")
+async def treasury_sync(db: Client = Depends(get_supabase)):
+    """Refresh on-chain balances into treasury_wallets and return them."""
+    synced = await wallet_service.sync_balances(db)
+    return {"synced": synced}
+
+
+@router.post("/treasury/sweep-hot")
+async def treasury_sweep_hot(db: Client = Depends(get_supabase)):
+    """Manually trigger a hot->main sweep (stubbed unless TREASURY_SWEEP_STUB=false)."""
+    return await hot_sweeper.run_once(db)
