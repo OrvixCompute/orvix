@@ -31,8 +31,9 @@ from app.models.inference import (
     Usage,
 )
 from app.models.protocol import JobMessage
-from app.services import inference_service, tier_service
+from app.services import inference_service, quota_service, tier_service
 from app.services.billing_service import BillingService
+from app.services.holder import holder_service
 from app.services.node_manager import NodeTimeoutError, node_manager
 
 router = APIRouter(prefix="/v1", tags=["inference"])
@@ -134,34 +135,50 @@ async def chat_completions(
     inference_service.validate_model(body.model)
 
     prompt_tokens = inference_service.estimate_prompt_tokens(body.messages)
-
-    # Pre-generation balance check against the worst-case cost.
     billing = BillingService(db)
-    max_cost = inference_service.estimate_max_cost(
-        body.model, prompt_tokens, body.max_tokens, tier
-    )
     current_balance = Decimal(billing.get_balance(user["id"])["balance_usdc"])
-    if current_balance < max_cost:
-        raise InsufficientBalanceError(
-            "Insufficient USDC balance for this request",
-            details={
-                "current_balance": str(current_balance),
-                "estimated_cost": str(max_cost),
-            },
+
+    # Quota gate: holders are unlimited; non-holders get CHAT_LIFETIME_FREE_LIMIT
+    # free requests (not billed), then must pay (balance) or are blocked (402).
+    is_holder, _ = await holder_service.get_holder_status(db, user["wallet_address"])
+    quota = quota_service.enforce_chat_quota(db, user["wallet_address"], is_holder, current_balance)
+    free = quota["free"]
+
+    # Balance is only pre-checked for billed requests; free-tier requests skip it.
+    if not free:
+        max_cost = inference_service.estimate_max_cost(
+            body.model, prompt_tokens, body.max_tokens, tier
         )
+        if current_balance < max_cost:
+            raise InsufficientBalanceError(
+                "Insufficient USDC balance for this request",
+                details={
+                    "current_balance": str(current_balance),
+                    "estimated_cost": str(max_cost),
+                },
+            )
 
     node = node_manager.select_node(body.model, tier)
     if node is None:
         logger.warning("No nodes available for {} — falling back to mock", body.model)
-        return await _serve_mock(db, billing, user, api_key, body, prompt_tokens, tier, started)
+        resp = await _serve_mock(
+            db, billing, user, api_key, body, prompt_tokens, tier, started, free=free
+        )
+    else:
+        resp = await _serve_node(
+            db, billing, user, api_key, node, body, prompt_tokens, tier, started, free=free
+        )
 
-    return await _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tier, started)
+    resp.headers["X-Orvix-Quota-Type"] = quota["type"]
+    if quota["remaining"] is not None:
+        resp.headers["X-Orvix-Quota-Remaining"] = str(quota["remaining"])
+    return resp
 
 
 # ===========================================================================
 # Node-backed path
 # ===========================================================================
-async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tier, started):
+async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tier, started, free=False):
     job = JobMessage(
         job_id=str(uuid.uuid4()),
         model=body.model,
@@ -174,7 +191,7 @@ async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tie
 
     if body.stream:
         return await _serve_node_streaming(
-            db, billing, user, api_key, node, body, job, prompt_tokens, tier, started
+            db, billing, user, api_key, node, body, job, prompt_tokens, tier, started, free=free
         )
 
     try:
@@ -195,9 +212,14 @@ async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tie
 
     prompt_tokens = result.prompt_tokens or prompt_tokens
     completion_tokens = result.completion_tokens
-    cost = inference_service.calculate_cost(body.model, prompt_tokens, completion_tokens, tier)
+    cost = (
+        Decimal("0")
+        if free
+        else inference_service.calculate_cost(body.model, prompt_tokens, completion_tokens, tier)
+    )
 
-    billing.deduct_usdc(user["id"], cost)
+    if not free:
+        billing.deduct_usdc(user["id"], cost)
     await node_manager.settle_job(node, cost)
     latency_ms = int((time.perf_counter() - started) * 1000)
     _record_job(
@@ -222,7 +244,7 @@ async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tie
 
 
 async def _serve_node_streaming(
-    db, billing, user, api_key, node, body, job, prompt_tokens, tier, started
+    db, billing, user, api_key, node, body, job, prompt_tokens, tier, started, free=False
 ):
     async def event_gen():
         completion_tokens = 0
@@ -243,11 +265,16 @@ async def _serve_node_streaming(
             return
 
         # Settle billing once the stream finishes.
-        cost = inference_service.calculate_cost(
-            body.model, final_prompt_tokens, completion_tokens, tier
+        cost = (
+            Decimal("0")
+            if free
+            else inference_service.calculate_cost(
+                body.model, final_prompt_tokens, completion_tokens, tier
+            )
         )
         try:
-            billing.deduct_usdc(user["id"], cost)
+            if not free:
+                billing.deduct_usdc(user["id"], cost)
             await node_manager.settle_job(node, cost)
             latency_ms = int((time.perf_counter() - started) * 1000)
             _record_job(
@@ -275,16 +302,21 @@ async def _serve_node_streaming(
 # ===========================================================================
 # Mock fallback path (no nodes connected)
 # ===========================================================================
-async def _serve_mock(db, billing, user, api_key, body, prompt_tokens, tier, started):
+async def _serve_mock(db, billing, user, api_key, body, prompt_tokens, tier, started, free=False):
     content, completion_tokens = inference_service.generate_mock(body.messages, body.max_tokens)
-    cost = inference_service.calculate_cost(body.model, prompt_tokens, completion_tokens, tier)
+    cost = (
+        Decimal("0")
+        if free
+        else inference_service.calculate_cost(body.model, prompt_tokens, completion_tokens, tier)
+    )
 
     if body.stream:
         return await _serve_mock_streaming(
-            db, billing, user, api_key, body, content, prompt_tokens, completion_tokens, cost, tier, started
+            db, billing, user, api_key, body, content, prompt_tokens, completion_tokens, cost, tier, started, free=free
         )
 
-    billing.deduct_usdc(user["id"], cost)
+    if not free:
+        billing.deduct_usdc(user["id"], cost)
     latency_ms = int((time.perf_counter() - started) * 1000)
     _record_job(
         db,
@@ -322,9 +354,10 @@ async def _serve_mock(db, billing, user, api_key, body, prompt_tokens, tier, sta
 
 
 async def _serve_mock_streaming(
-    db, billing, user, api_key, body, content, prompt_tokens, completion_tokens, cost, tier, started
+    db, billing, user, api_key, body, content, prompt_tokens, completion_tokens, cost, tier, started, free=False
 ):
-    billing.deduct_usdc(user["id"], cost)
+    if not free:
+        billing.deduct_usdc(user["id"], cost)
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 

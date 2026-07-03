@@ -9,6 +9,7 @@ import random
 from typing import AsyncIterator
 
 from orvix_node.inference.base import (
+    ChatEngine,
     GenerateChunk,
     GenerateRequest,
     GenerateResponse,
@@ -37,19 +38,22 @@ def _last_user(messages: list[dict]) -> str:
     return str(messages[-1].get("content", "")) if messages else ""
 
 
-class MockBackend:
+class MockBackend(ChatEngine):
+    required_vram_gb = 0.0
+    supported_models: list[str] = []  # mock serves whatever model it's given
+
     def __init__(self, provider_id: str = "local") -> None:
         self.provider_id = provider_id
-        self._model: str | None = None
+        self.model: str | None = None
         self._ready = False
 
-    async def initialize(self, model: str) -> None:
-        logger.info("Mock backend initialized for model {}", model)
+    async def load(self, model_id: str) -> None:
+        logger.info("Mock backend loading model {}", model_id)
         await asyncio.sleep(1.0)  # simulate load time
-        self._model = model
+        self.model = model_id
         self._ready = True
 
-    async def is_ready(self) -> bool:
+    async def is_loaded(self) -> bool:
         return self._ready
 
     def _make_content(self, messages: list[dict]) -> str:
@@ -98,6 +102,6 @@ class MockBackend:
             ),
         )
 
-    async def shutdown(self) -> None:
+    async def unload(self) -> None:
         self._ready = False
-        logger.info("Mock backend shut down")
+        logger.info("Mock backend unloaded")

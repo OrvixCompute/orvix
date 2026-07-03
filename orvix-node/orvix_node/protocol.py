@@ -61,6 +61,10 @@ class RegisterMessage(BaseMessage):
     gpu_info: GPUInfo
     models_supported: List[str]
     max_concurrent_jobs: int
+    # Engine capabilities (e.g. ["chat", "image"]) and total VRAM. Optional for
+    # backward compatibility: older nodes omit them.
+    engines: List[str] = Field(default_factory=list)
+    vram_gb: float = 0.0
 
 
 class HeartbeatMessage(BaseMessage):
@@ -88,6 +92,20 @@ class JobChunkMessage(BaseMessage):
     is_final: bool = False
 
 
+class ImageJobCompleteMessage(BaseMessage):
+    type: Literal["job.image.complete"] = "job.image.complete"
+    job_id: str
+    image_id: str
+    binary_url: str  # where the orchestrator fetches the PNG bytes
+    metadata: dict = Field(default_factory=dict)
+
+
+class ImageJobFailedMessage(BaseMessage):
+    type: Literal["job.image.failed"] = "job.image.failed"
+    job_id: str
+    error: str
+
+
 # --- Inbound: orchestrator -> node -----------------------------------------
 class RegisterAckMessage(BaseMessage):
     type: Literal["register_ack"] = "register_ack"
@@ -107,6 +125,21 @@ class JobMessage(BaseMessage):
     user_tier: str = "bronze"
 
 
+class ImageJobDispatchMessage(BaseMessage):
+    type: Literal["job.image.dispatch"] = "job.image.dispatch"
+    job_id: str
+    model: str
+    prompt: str
+    width: int = 1024
+    height: int = 1024
+    num_inference_steps: int = 4
+    seed: Optional[int] = None
+    # Per-job token the node echoes back as the X-Node-Secret header on the
+    # binary fetch, so the binary endpoint is authorized without sharing the
+    # long-lived node secret.
+    binary_token: str
+
+
 class PingMessage(BaseMessage):
     type: Literal["ping"] = "ping"
 
@@ -123,8 +156,11 @@ AnyMessage = Annotated[
         HeartbeatMessage,
         JobResultMessage,
         JobChunkMessage,
+        ImageJobCompleteMessage,
+        ImageJobFailedMessage,
         RegisterAckMessage,
         JobMessage,
+        ImageJobDispatchMessage,
         PingMessage,
         ShutdownMessage,
     ],

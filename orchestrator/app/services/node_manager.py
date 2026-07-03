@@ -21,6 +21,9 @@ from app.config import settings
 from app.database import get_supabase
 from app.logger import logger
 from app.models.protocol import (
+    ImageJobCompleteMessage,
+    ImageJobDispatchMessage,
+    ImageJobFailedMessage,
     JobChunkMessage,
     JobMessage,
     JobResultMessage,
@@ -62,6 +65,8 @@ class NodeConnection:
     current_jobs: int = 0
     last_heartbeat: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     models_supported: list[str] = field(default_factory=list)
+    engines: list[str] = field(default_factory=list)  # e.g. ["chat", "image"]
+    vram_gb: float = 0.0
     pending_jobs: dict[str, PendingJob] = field(default_factory=dict)
     _send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -104,6 +109,9 @@ class NodeManager:
             raise ValueError("Invalid node_secret")
 
         node_id = str(uuid.uuid4())
+        # `engines`/`vram_gb` are optional (older nodes omit them). Default the
+        # engine list to ["chat"] so pre-capability nodes still serve chat.
+        engines = list(msg.engines) if msg.engines else ["chat"]
         conn = NodeConnection(
             node_id=node_id,
             provider_id=msg.provider_id,
@@ -112,6 +120,8 @@ class NodeManager:
             gpu_info=msg.gpu_info.model_dump(),
             max_concurrent_jobs=msg.max_concurrent_jobs,
             models_supported=list(msg.models_supported),
+            engines=engines,
+            vram_gb=msg.vram_gb,
         )
 
         # Upsert the nodes row.
@@ -123,6 +133,8 @@ class NodeManager:
                 "gpu_model": msg.gpu_info.model,
                 "vram_mb": msg.gpu_info.vram_total_mb,
                 "models_supported": list(msg.models_supported),
+                "engines": engines,
+                "vram_gb": msg.vram_gb,
                 "max_concurrent_jobs": msg.max_concurrent_jobs,
                 "last_heartbeat": datetime.now(timezone.utc).isoformat(),
             }
@@ -182,6 +194,19 @@ class NodeManager:
             candidates.sort(key=lambda c: c.current_jobs)
         return candidates[0]
 
+    def select_image_node(self, model: str) -> NodeConnection | None:
+        """Pick a ready node that advertises the image engine and serves `model`."""
+        candidates = [
+            c
+            for c in self.connected_nodes.values()
+            if c.status == "ready"
+            and "image" in c.engines
+            and model in c.models_supported
+            and c.current_jobs < c.max_concurrent_jobs
+        ]
+        candidates.sort(key=lambda c: c.current_jobs)
+        return candidates[0] if candidates else None
+
     # --- dispatch ----------------------------------------------------------
     async def dispatch_job(self, node: NodeConnection, job: JobMessage):
         """Send a job to a node and return its result.
@@ -231,6 +256,34 @@ class NodeManager:
             node.pending_jobs.pop(job.job_id, None)
             node.current_jobs = max(0, node.current_jobs - 1)
 
+    async def dispatch_image_job(
+        self, node: NodeConnection, dispatch: ImageJobDispatchMessage
+    ) -> ImageJobCompleteMessage:
+        """Send an image job to a node and await its completion.
+
+        Returns the ImageJobCompleteMessage. Raises NodeTimeoutError on timeout
+        and RuntimeError if the node reports failure.
+        """
+        pending = PendingJob(stream=False, future=asyncio.get_running_loop().create_future())
+        node.pending_jobs[dispatch.job_id] = pending
+        node.current_jobs += 1
+        try:
+            await node.send(dispatch)
+            result = await asyncio.wait_for(
+                pending.future, timeout=float(settings.IMAGE_JOB_TIMEOUT)
+            )
+        except asyncio.TimeoutError as exc:
+            raise NodeTimeoutError(
+                f"Node {node.node_id} timed out on image job {dispatch.job_id}"
+            ) from exc
+        finally:
+            node.pending_jobs.pop(dispatch.job_id, None)
+            node.current_jobs = max(0, node.current_jobs - 1)
+
+        if isinstance(result, ImageJobFailedMessage):
+            raise RuntimeError(result.error)
+        return result
+
     # --- response correlation (called from the WS receive loop) ------------
     def handle_job_result(self, node_id: str, msg: JobResultMessage) -> None:
         conn = self.connected_nodes.get(node_id)
@@ -255,6 +308,17 @@ class NodeManager:
             pending.queue.put_nowait(msg)
             if msg.is_final:
                 pending.queue.put_nowait(_STREAM_END)
+
+    def handle_image_result(
+        self, node_id: str, msg: ImageJobCompleteMessage | ImageJobFailedMessage
+    ) -> None:
+        """Resolve the awaiting image dispatch with the complete/failed message."""
+        conn = self.connected_nodes.get(node_id)
+        if conn is None:
+            return
+        pending = conn.pending_jobs.get(msg.job_id)
+        if pending and pending.future is not None and not pending.future.done():
+            pending.future.set_result(msg)
 
     # --- provider settlement (Prompt 6) ------------------------------------
     async def settle_job(self, node: NodeConnection, cost_usdc: Decimal) -> Decimal:

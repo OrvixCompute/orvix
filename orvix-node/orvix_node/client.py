@@ -15,11 +15,13 @@ from websockets.exceptions import ConnectionClosed
 from orvix_node.config import NodeConfig
 from orvix_node.exceptions import AuthError
 from orvix_node.gpu import detector
+from orvix_node.inference.router import available_engine_types
 from orvix_node.logger import logger
 from orvix_node.protocol import (
     BaseMessage,
     GPUInfo,
     HeartbeatMessage,
+    ImageJobDispatchMessage,
     JobMessage,
     RegisterMessage,
     parse_message,
@@ -29,6 +31,7 @@ from orvix_node.state import state
 from orvix_node.version import __version__
 
 JobHandler = Callable[[JobMessage], Awaitable[None]]
+ImageHandler = Callable[[ImageJobDispatchMessage], Awaitable[None]]
 
 ACK_TIMEOUT = 10.0
 MAX_BACKOFF = 60.0
@@ -40,6 +43,7 @@ class OrchestratorClient:
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._outbound: asyncio.Queue[BaseMessage] = asyncio.Queue()
         self._job_handler: JobHandler | None = None
+        self._image_handler: ImageHandler | None = None
         self._stop = asyncio.Event()
         self._draining = False
         self._connected = False
@@ -52,6 +56,9 @@ class OrchestratorClient:
 
     def set_job_handler(self, callback: JobHandler) -> None:
         self._job_handler = callback
+
+    def set_image_handler(self, callback: ImageHandler) -> None:
+        self._image_handler = callback
 
     async def send_message(self, msg: BaseMessage) -> None:
         await self._outbound.put(msg)
@@ -173,6 +180,8 @@ class OrchestratorClient:
             gpu_info=gpu,
             models_supported=[self.config.model],
             max_concurrent_jobs=self.config.max_concurrent_jobs,
+            engines=available_engine_types(self.config.enable_image_engine),
+            vram_gb=round(gpu.vram_total_mb / 1024, 1) if gpu.vram_total_mb else 0.0,
         )
         await ws.send(serialize(reg))
 
@@ -227,6 +236,8 @@ class OrchestratorClient:
         mtype = getattr(msg, "type", None)
         if mtype == "job":
             await self._dispatch_job(msg)  # type: ignore[arg-type]
+        elif mtype == "job.image.dispatch":
+            await self._dispatch_image(msg)  # type: ignore[arg-type]
         elif mtype == "ping":
             await self.send_message(
                 HeartbeatMessage(
@@ -247,5 +258,13 @@ class OrchestratorClient:
             return
         # Run in the background so the receive loop keeps flowing.
         task = asyncio.create_task(self._job_handler(job), name=f"job-{job.job_id}")
+        self._job_tasks.add(task)
+        task.add_done_callback(self._job_tasks.discard)
+
+    async def _dispatch_image(self, job: ImageJobDispatchMessage) -> None:
+        if self._image_handler is None:
+            logger.warning("Received image job {} but no image handler registered", job.job_id)
+            return
+        task = asyncio.create_task(self._image_handler(job), name=f"image-{job.job_id}")
         self._job_tasks.add(task)
         task.add_done_callback(self._job_tasks.discard)

@@ -8,7 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- (entries here as work progresses)
+- Node multi-engine architecture: `AbstractEngine` base with `ChatEngine`/`ImageEngine` families and a `model_id → engine_type` router (foundation for image generation)
+- `FluxEngine` — Flux Schnell text-to-image via Diffusers (bfloat16, 1024×1024 / 4 steps defaults); heavy GPU deps imported lazily
+- Node advertises `engines` + `vram_gb` at registration (additive, backward-compatible; image is opt-in via `enable_image_engine`)
+- `image` optional extra (diffusers/transformers/accelerate/…) and opt-in `scripts/download_flux.py` pre-download helper
+- `ModelManager` — swaps chat/image engines through a single GPU's VRAM with a swap lock, drain-before-unload, idle unload (default 10 min), and thrash detection
+- Managed vLLM mode (`vllm_managed`): the node owns the vLLM server as a subprocess so `unload()` actually frees VRAM for the image engine (start on load, kill on unload)
+- Node `/v1/status` endpoint: current engine, VRAM free/total, uptime, active jobs
+- Config: `vllm_managed`, `idle_unload_minutes`
+- **Image generation (orchestrator):** `POST /v1/images/generations` (OpenAI DALL-E-compatible) — dispatches to an image-capable node, fetches the PNG from the node's binary endpoint, saves it, returns URL/b64
+- `GET /v1/models` catalog endpoint (chat + `flux-schnell` image model)
+- Protocol messages `job.image.dispatch` / `job.image.complete` / `job.image.failed`; `RegisterMessage` gains optional `engines[]` + `vram_gb`
+- Node binary endpoint `GET /v1/binary/image/<id>` (per-job `X-Node-Secret` token, stream-then-delete) + node image job handler
+- Node manager reads node capabilities and routes image jobs only to image-capable nodes
+- Migrations `010_image_jobs`, `011_node_capabilities`; config `IMAGE_JOB_TIMEOUT`, `IMAGE_STORAGE_DIR`, `PUBLIC_IMAGE_URL_BASE`; node config `image_tmp_dir`, `binary_public_url`
+- **Quota system:** holder verification (`holder.py`, 15-min cached ORVX balance) + `quota_service`; chat free tier (2 lifetime for non-holders, then pay-or-402), image daily limits (5/day holders; 1/day grace for everyone when `ORVX_MINT_ADDRESS` unset; non-holders 403 when the mint is set; 429 over limit, resets 00:00 UTC). `GET /v1/account/quota`, quota response headers on chat/images. Migration `012_quotas`; config `ORVX_HOLDER_THRESHOLD`, `CHAT_LIFETIME_FREE_LIMIT`, `IMAGE_DAILY_LIMIT_HOLDER`, `IMAGE_DAILY_LIMIT_FALLBACK`, `HOLDER_CACHE_TTL_MINUTES`, `UPGRADE_URL`, `TOKENOMICS_URL`
+- **Image storage lifecycle:** 24h auto-delete via `scripts/cleanup_images.py` + hourly systemd timer (`scripts/systemd/`), orphan-file + stale-holder sweeps; `MAX_IMAGE_STORAGE_MB` safety cap (503 before quota when full); `GET /v1/admin/storage/stats`; image quota refunded on generation failure; recent-images list on `/v1/account/quota`; node 10-min temp-file sweeper. Docs: operations/api-reference/ARCHITECTURE updated
+
+### Changed
+- Unified engine lifecycle to `load(model_id)` / `unload` / `is_loaded` across all engines (renamed from `initialize`/`is_ready`/`shutdown`)
+- The executor no longer owns a single backend; it routes each job through the `ModelManager`, loading/swapping the right engine on demand
 
 ## [0.2.0] — 2026-06-26 — Whitepaper Alignment
 

@@ -26,6 +26,15 @@ dependencies = [
 [project.optional-dependencies]
 # Real GPU inference. Linux + CUDA only.
 gpu = ["pynvml>=11.5", "vllm>=0.5"]
+# Image generation (Flux Schnell via Diffusers). Linux + CUDA only, heavy.
+image = [
+    "diffusers>=0.31.0",
+    "transformers>=4.44.0",
+    "accelerate>=0.34.0",
+    "sentencepiece>=0.2.0",
+    "protobuf>=4.25",
+    "Pillow>=10.0",
+]
 # GPU detection without vLLM (works for monitoring on any NVIDIA box).
 nvml = ["pynvml>=11.5"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]

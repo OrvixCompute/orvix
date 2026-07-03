@@ -40,7 +40,7 @@ class NodeConfig(BaseModel):
     provider_id: str
     node_secret: str
 
-    orchestrator_url: str = "wss://api.orvix.xyz"
+    orchestrator_url: str = "wss://api.orvix.network"
     model: str = "qwen-2.5-7b"
     inference_endpoint: str = "http://localhost:8000/v1"  # local vLLM, later
     heartbeat_interval: int = 15
@@ -51,6 +51,23 @@ class NodeConfig(BaseModel):
     json_logs: bool = False
     # Inference backend: "mock" (default) or "vllm".
     backend: str = "mock"
+    # Advertise image (Flux) capability at registration. Opt-in: only enable once
+    # the ModelManager swap logic is deployed, else the node would advertise an
+    # engine it cannot yet serve. Dual-mode (chat + image on one GPU) also needs
+    # vllm_managed=true so the manager can free VRAM by stopping the vLLM server.
+    enable_image_engine: bool = False
+    # Let the node own the vLLM server as a subprocess (start on load, kill on
+    # unload to free VRAM). Required for chat<->image swap; keep false when the
+    # vLLM server is managed out of band.
+    vllm_managed: bool = False
+    # Unload the resident engine after this many idle minutes to free VRAM.
+    idle_unload_minutes: int = 10
+    # Where generated images are written before the orchestrator fetches them.
+    image_tmp_dir: str = "/tmp/node-images"
+    # Externally reachable base URL for this node's binary endpoint (the
+    # orchestrator fetches images from here). Falls back to the local health
+    # server when empty (dev only — not reachable from a remote orchestrator).
+    binary_public_url: str = ""
 
     def masked(self) -> dict:
         """Config as a dict with secrets masked, for display."""
@@ -121,7 +138,7 @@ provider_id: ""        # your provider id (from POST /v1/provider/register)
 node_secret: ""        # your node secret (keep this private)
 
 # Connection:
-orchestrator_url: "wss://api.orvix.xyz"   # use ws://localhost:8000 for local dev
+orchestrator_url: "wss://api.orvix.network"   # use ws://localhost:8000 for local dev
 model: "qwen-2.5-7b"
 
 # Runtime:
@@ -129,6 +146,11 @@ heartbeat_interval: 15
 health_port: 9000
 max_concurrent_jobs: 4
 backend: "mock"        # "mock" or "vllm"
+
+# Engines / VRAM (single-GPU swap):
+enable_image_engine: false   # advertise + serve Flux images (needs vllm_managed for dual-mode)
+vllm_managed: false          # node owns the vLLM server subprocess (kill on unload to free VRAM)
+idle_unload_minutes: 10      # unload the resident engine after this many idle minutes
 
 # Logging:
 log_level: "INFO"

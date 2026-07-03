@@ -176,3 +176,34 @@ Planned but not yet implemented:
 - **Why Supabase:** managed PostgreSQL with auth and RLS, without the ops burden.
 - **Why a WebSocket protocol:** persistent, bidirectional job dispatch and streaming with low
   per-message overhead.
+
+## 14. Image Generation & Storage Lifecycle
+
+Image generation reuses the WebSocket job-dispatch model with an added binary
+transfer channel:
+
+1. **Dispatch** — `POST /v1/images/generations` selects an image-capable node
+   (advertised via `engines` at registration) and sends `job.image.dispatch`
+   over the WebSocket, carrying a per-job `binary_token`.
+2. **Generate** — the node runs the Flux engine (swapped into VRAM by the
+   ModelManager, freeing the chat engine if needed), writes the PNG to
+   `/tmp/node-images/<id>.png`, and replies `job.image.complete` with a
+   `binary_url`.
+3. **Fetch** — the orchestrator GETs `binary_url` with the token as
+   `X-Node-Secret`; the node streams the bytes and deletes its temp file.
+4. **Store** — the orchestrator saves to `IMAGE_STORAGE_DIR`, records an
+   `image_jobs` row with `expires_at = now + 24h`, and returns a public URL
+   served by nginx.
+
+**Lifecycle / retention:**
+- Images auto-delete after 24h (hourly `orvix-image-cleanup` systemd timer →
+  `scripts/cleanup_images.py`), which also sweeps orphan files and stale
+  `holder_status` rows.
+- `MAX_IMAGE_STORAGE_MB` caps the directory; over-cap requests get `503` before
+  consuming quota.
+- Nodes run a 10-min sweeper for un-fetched temp files.
+
+**Access control:** holder-gated quota (`quota_service` + `holder.py`, ORVX
+balance cached 15 min). Holders get `IMAGE_DAILY_LIMIT_HOLDER`/day; when
+`ORVX_MINT_ADDRESS` is unset (alpha) everyone gets `IMAGE_DAILY_LIMIT_FALLBACK`
+/day. Quota is consumed up front and refunded if generation fails.

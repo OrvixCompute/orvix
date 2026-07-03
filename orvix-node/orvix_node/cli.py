@@ -64,6 +64,7 @@ async def _run_agent(cfg) -> None:
     from orvix_node.executor import JobExecutor
     from orvix_node.gpu import detector
     from orvix_node.health import HealthServer
+    from orvix_node.inference.manager import ModelManager
     from orvix_node.logger import configure_logging, logger
     from orvix_node.state import state
 
@@ -80,23 +81,66 @@ async def _run_agent(cfg) -> None:
     await state.set_gpu_status("ok")
     logger.info("GPU: {} ({} MB VRAM)", gpu.model, gpu.vram_total_mb)
 
-    # Backend selection.
+    # Chat engine selection.
     backend_name = os.environ.get("ORVIX_NODE_BACKEND", cfg.backend).lower()
     if backend_name == "vllm":
         from orvix_node.inference.vllm import VLLMBackend
 
-        logger.warning("Using vLLM backend (requires GPU + Prompt 7 implementation)")
-        backend = VLLMBackend(model=cfg.model)
+        logger.warning("Using vLLM chat engine (managed={})", cfg.vllm_managed)
+        chat_engine = VLLMBackend(model=cfg.model, managed=cfg.vllm_managed)
     else:
         from orvix_node.inference.mock import MockBackend
 
-        logger.warning("Using MOCK inference backend — responses are fake.")
-        backend = MockBackend(provider_id=cfg.provider_id)
+        logger.warning("Using MOCK inference engine — responses are fake.")
+        chat_engine = MockBackend(provider_id=cfg.provider_id)
 
-    executor = JobExecutor(backend, max_concurrent=cfg.max_concurrent_jobs)
-    await executor.initialize(cfg.model)
+    engines = {"chat": chat_engine}
+    if cfg.enable_image_engine:
+        from orvix_node.inference.flux import FluxEngine
 
-    health = HealthServer(cfg.health_port)
+        engines["image"] = FluxEngine()
+        logger.info("Image engine (Flux) enabled — chat<->image will swap on demand.")
+
+    manager = ModelManager(
+        engines, idle_timeout_seconds=cfg.idle_unload_minutes * 60
+    )
+    binary_base_url = cfg.binary_public_url or f"http://127.0.0.1:{cfg.health_port}"
+    executor = JobExecutor(
+        manager,
+        max_concurrent=cfg.max_concurrent_jobs,
+        image_tmp_dir=cfg.image_tmp_dir,
+        binary_base_url=binary_base_url,
+    )
+
+    # Pre-warm the chat engine so the first request isn't slowed by a cold load.
+    async with manager.serving(cfg.model):
+        pass
+
+    # Background task: unload the resident engine after it goes idle.
+    async def _idle_loop() -> None:
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await manager.idle_check()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Idle check failed: {}", exc)
+
+    idle_task = asyncio.create_task(_idle_loop(), name="idle-check")
+
+    # Background task: remove leftover image temp files (>1h old).
+    async def _sweep_loop() -> None:
+        from orvix_node.binary import sweep_temp_dir
+
+        while True:
+            await asyncio.sleep(600)
+            try:
+                sweep_temp_dir(cfg.image_tmp_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Temp sweep failed: {}", exc)
+
+    sweep_task = asyncio.create_task(_sweep_loop(), name="temp-sweep")
+
+    health = HealthServer(cfg.health_port, manager=manager)
     await health.start()
 
     client = OrchestratorClient(cfg)
@@ -106,7 +150,13 @@ async def _run_agent(cfg) -> None:
             job, send_chunk=client.send_message, send_result=client.send_message
         )
 
+    async def image_handler(dispatch) -> None:
+        await executor.execute_image(
+            dispatch, send_complete=client.send_message, send_failed=client.send_message
+        )
+
     client.set_job_handler(job_handler)
+    client.set_image_handler(image_handler)
 
     # Graceful shutdown on SIGINT/SIGTERM.
     loop = asyncio.get_running_loop()
@@ -130,6 +180,8 @@ async def _run_agent(cfg) -> None:
 
     # Drain & shut down.
     await client.stop()
+    idle_task.cancel()
+    sweep_task.cancel()
     await executor.shutdown()
     await health.stop()
     if client_task in done and client_task.exception():
@@ -306,7 +358,7 @@ def test_inference(prompt, model, stream) -> None:
 
             backend = MockBackend(provider_id="local-test")
 
-        await backend.initialize(model)
+        await backend.load(model)
         req = GenerateRequest(messages=[{"role": "user", "content": prompt}])
 
         if stream:
@@ -326,7 +378,7 @@ def test_inference(prompt, model, stream) -> None:
                 f"[usage] prompt={resp.prompt_tokens} completion={resp.completion_tokens} "
                 f"finish={resp.finish_reason}"
             )
-        await backend.shutdown()
+        await backend.unload()
 
     asyncio.run(_run())
 

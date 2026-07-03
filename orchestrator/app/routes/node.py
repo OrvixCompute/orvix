@@ -7,6 +7,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.logger import logger
 from app.models.protocol import (
     HeartbeatMessage,
+    ImageJobCompleteMessage,
+    ImageJobFailedMessage,
     JobChunkMessage,
     JobResultMessage,
     RegisterAckMessage,
@@ -82,6 +84,8 @@ async def node_connect(websocket: WebSocket) -> None:
                 node_manager.handle_job_result(node_id, incoming)
             elif isinstance(incoming, JobChunkMessage):
                 node_manager.handle_job_chunk(node_id, incoming)
+            elif isinstance(incoming, (ImageJobCompleteMessage, ImageJobFailedMessage)):
+                node_manager.handle_image_result(node_id, incoming)
             else:
                 logger.debug("Ignoring {} from node {}", incoming.type, node_id)
 

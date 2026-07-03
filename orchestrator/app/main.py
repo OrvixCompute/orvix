@@ -38,7 +38,9 @@ from app.routes import (
     billing,
     governance,
     health,
+    images,
     inference,
+    models,
     node,
     provider,
     staking,
@@ -97,6 +99,8 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(api_keys.router)
 app.include_router(inference.router)
+app.include_router(images.router)
+app.include_router(models.router)
 app.include_router(billing.router)
 app.include_router(node.router)
 app.include_router(provider.router)

@@ -10,6 +10,7 @@ from app.database import get_supabase
 from app.dependencies import get_user_from_api_key
 from app.models.inference import ChatMessage
 from app.services import inference_service
+from app.services.holder import holder_service
 from tests.fakes import FakeSupabase
 
 
@@ -42,7 +43,7 @@ def test_estimate_prompt_tokens_positive():
 
 # --- Endpoint tests --------------------------------------------------------
 @pytest.fixture
-def client_and_db():
+def client_and_db(monkeypatch):
     db = FakeSupabase()
     api_key_id = "key-" + "0" * 8
 
@@ -52,6 +53,13 @@ def client_and_db():
             "user": db._table("users").rows[0],
             "api_key": {"id": api_key_id, "user_id": db._table("users").rows[0]["id"]},
         }
+
+    # These tests exercise billing/tiers; treat the user as a holder so the chat
+    # quota's free tier doesn't apply (free-tier behavior is covered in test_quota).
+    async def fake_holder(db_, wallet):
+        return True, 20000.0
+
+    monkeypatch.setattr(holder_service, "get_holder_status", fake_holder)
 
     app.dependency_overrides[get_supabase] = lambda: db
     app.dependency_overrides[get_user_from_api_key] = fake_user_dep

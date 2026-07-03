@@ -1,0 +1,11 @@
+[Unit]
+Description=Orvix image storage cleanup (delete expired images, sweep orphans, prune holder cache)
+After=network-online.target
+
+[Service]
+Type=oneshot
+# pydantic-settings loads .env from the working directory, so no EnvironmentFile
+# is needed as long as /opt/orvix/orchestrator/.env exists.
+WorkingDirectory=/opt/orvix/orchestrator
+ExecStart=/opt/orvix/orchestrator/.venv/bin/python scripts/cleanup_images.py
+User=root
