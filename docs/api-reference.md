@@ -9,8 +9,17 @@ All endpoints are served under the `/v1` prefix. There are two kinds of
 authentication:
 
 - **JWT** — obtained by signing a wallet challenge. Used for account-level
-  actions (API keys, billing, provider management).
-- **API key** — a `orvx_sk_...` bearer token. Used for inference requests.
+  actions: API keys, billing, provider management, and account status
+  (`/v1/account/tier`, `/v1/account/quota`).
+- **API key** — a `orvx_sk_...` bearer token. Used for inference requests
+  (`/v1/chat/completions`, `/v1/images/generations`).
+
+> **Which scheme for which endpoint.** Account/dashboard endpoints authenticate
+> with a **JWT** (`get_current_user`); inference endpoints authenticate with an
+> **API key** (`get_user_from_api_key`). Sending an `orvx_sk_` key to a JWT-only
+> endpoint returns `401 "Not enough segments"` — the key is not a JWT. For
+> deploy/verification scripts, read `/v1/account/*` with a wallet JWT, or query
+> the `image_quota_usage` / `holder_status` tables directly.
 
 ---
 
@@ -131,6 +140,28 @@ Return your **stake-based** tier, discount, and progress to the next tier.
   "next_tier": { "name": "diamond", "required_stake": "250000", "additional_needed": "175000" }
 }
 ```
+
+### `GET /v1/account/quota`
+Current chat + image quota status for the authenticated wallet, plus the images
+generated in the last 24h (before auto-delete). **Auth: JWT.**
+
+```bash
+curl https://orvix.network/v1/account/quota \
+  -H "Authorization: Bearer <JWT>"
+```
+
+```json
+{
+  "is_holder": false,
+  "orvx_balance": "0",
+  "chat": { "type": "lifetime_free", "limit": 2, "used": 0 },
+  "image": { "type": "grace_daily", "daily_limit": 1, "used_today": 0,
+             "generated_images_last_24h": [] }
+}
+```
+
+When `ORVX_MINT_ADDRESS` is unset (grace period) everyone gets `grace_daily`
+(1/day). Once set, holders get `holder_daily` (5/day) and non-holders are blocked.
 
 ---
 
