@@ -43,3 +43,7 @@ Thumbs.db
 
 # Local vendored deps (pip --target=.pkgs) — never commit
 .pkgs/
+
+# Treasury keypair files (generated locally; NEVER commit)
+treasury-keys/
+*.keypair.json

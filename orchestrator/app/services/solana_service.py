@@ -1,5 +1,6 @@
 """Thin async wrappers around the Helius JSON-RPC endpoints we need."""
 
+from decimal import Decimal
 from typing import Any, Optional
 
 import httpx
@@ -55,6 +56,27 @@ class SolanaService:
             [owner, {"mint": mint}, {"encoding": "jsonParsed"}],
         )
         return (result or {}).get("value", []) or []
+
+    async def get_token_balance(self, owner: str, mint: str) -> Decimal:
+        """Total UI balance of `mint` held by `owner` across its token accounts."""
+        total = Decimal(0)
+        for a in await self.get_token_accounts_by_owner(owner, mint):
+            info = a.get("account", {}).get("data", {}).get("parsed", {}).get("info", {})
+            amt = (info.get("tokenAmount") or {}).get("uiAmountString")
+            if amt is not None:
+                total += Decimal(amt)
+        return total
+
+    async def get_latest_blockhash(self) -> str:
+        result = await self._rpc("getLatestBlockhash", [{"commitment": "confirmed"}])
+        return result["value"]["blockhash"]
+
+    async def send_raw_transaction(self, raw_b64: str) -> str:
+        """Submit a base64-serialized signed transaction; returns the signature."""
+        return await self._rpc(
+            "sendTransaction",
+            [raw_b64, {"encoding": "base64", "maxRetries": 3}],
+        )
 
     # --- Parsing helpers ---------------------------------------------------
     @staticmethod

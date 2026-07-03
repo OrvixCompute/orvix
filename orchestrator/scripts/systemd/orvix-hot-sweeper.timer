@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Orvix hot-wallet sweep daily
+
+[Timer]
+# 00:30 UTC — after image cleanup (hourly) and clear of other daily jobs.
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Orvix hot-wallet sweeper (move excess USDC from hot to cold main)
+After=network-online.target
+
+[Service]
+Type=oneshot
+# pydantic-settings loads .env from the working directory.
+WorkingDirectory=/opt/orvix/orchestrator
+# WorkingDirectory is NOT on sys.path when running a script by path, so make the
+# app package importable (sweep_hot.py does `from app... import`).
+Environment=PYTHONPATH=/opt/orvix/orchestrator
+ExecStart=/opt/orvix/orchestrator/.venv/bin/python scripts/sweep_hot.py
+User=root
