@@ -14,12 +14,13 @@ authentication:
 - **API key** — a `orvx_sk_...` bearer token. Used for inference requests
   (`/v1/chat/completions`, `/v1/images/generations`).
 
-> **Which scheme for which endpoint.** Account/dashboard endpoints authenticate
-> with a **JWT** (`get_current_user`); inference endpoints authenticate with an
+> **Which scheme for which endpoint.** Most account/dashboard endpoints
+> authenticate with a **JWT** (`get_current_user`); inference endpoints use an
 > **API key** (`get_user_from_api_key`). Sending an `orvx_sk_` key to a JWT-only
-> endpoint returns `401 "Not enough segments"` — the key is not a JWT. For
-> deploy/verification scripts, read `/v1/account/*` with a wallet JWT, or query
-> the `image_quota_usage` / `holder_status` tables directly.
+> endpoint returns `401 "Not enough segments"` — the key is not a JWT.
+> **Exception:** the read-only status endpoints `/v1/account/tier` and
+> `/v1/account/quota` accept **either** a JWT or an API key, so programmatic
+> clients can check their own tier/quota before dispatching requests.
 
 ---
 
@@ -130,7 +131,7 @@ List pending top-up intents.
 
 ### `GET /v1/account/tier`
 Return your **stake-based** tier, discount, and progress to the next tier.
-**Auth: JWT.**
+**Auth: JWT or API key.**
 
 ```json
 {
@@ -143,7 +144,7 @@ Return your **stake-based** tier, discount, and progress to the next tier.
 
 ### `GET /v1/account/quota`
 Current chat + image quota status for the authenticated wallet, plus the images
-generated in the last 24h (before auto-delete). **Auth: JWT.**
+generated in the last 24h (before auto-delete). **Auth: JWT or API key.**
 
 ```bash
 curl https://orvix.network/v1/account/quota \

@@ -1,4 +1,8 @@
-"""Account endpoints: stake-based tier info (JWT-authenticated)."""
+"""Account endpoints: stake-based tier + quota status.
+
+Authenticated with EITHER a wallet JWT (dashboard) or an `orvx_sk_` API key
+(programmatic clients checking their own tier/quota) via get_current_user_flexible.
+"""
 
 from decimal import Decimal
 
@@ -6,7 +10,7 @@ from fastapi import APIRouter, Depends
 from supabase import Client
 
 from app.database import get_supabase
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user_flexible
 from app.logger import logger
 from app.models.billing import TierResponse
 from app.services import quota_service, tier_service
@@ -17,7 +21,7 @@ router = APIRouter(prefix="/v1/account", tags=["account"])
 
 @router.get("/tier", response_model=TierResponse)
 async def get_tier(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_flexible),
     db: Client = Depends(get_supabase),
 ):
     """Current tier, discount, and progress to the next tier — all stake-based."""
@@ -33,7 +37,7 @@ async def get_tier(
 
 @router.get("/quota")
 async def get_quota(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_flexible),
     db: Client = Depends(get_supabase),
 ):
     """Current chat + image quota status for the authenticated wallet."""

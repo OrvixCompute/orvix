@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.database import get_supabase
-from app.dependencies import get_current_user, get_user_from_api_key
+from app.dependencies import get_current_user_flexible, get_user_from_api_key
 from app.exceptions import OrvixException
 from app.main import app
 from app.services import quota_service
@@ -196,7 +196,7 @@ def test_account_quota_endpoint(monkeypatch):
 
     monkeypatch.setattr(holder_service, "get_holder_status", fake_holder)
     app.dependency_overrides[get_supabase] = lambda: db
-    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_current_user_flexible] = lambda: user
     client = TestClient(app)
     try:
         r = client.get("/v1/account/quota", headers={"Authorization": "Bearer jwt"})

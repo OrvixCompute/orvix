@@ -1,7 +1,10 @@
-"""FastAPI dependencies for the two authentication schemes.
+"""FastAPI dependencies for the authentication schemes.
 
-- get_current_user: JWT bearer (used by dashboard/user endpoints)
-- get_user_from_api_key: orvx_sk_ bearer (used by the inference API)
+- get_current_user: JWT bearer (dashboard/user endpoints)
+- get_user_from_api_key: orvx_sk_ bearer (inference API)
+- get_current_user_flexible: accepts EITHER, resolving to the user row — lets
+  account status endpoints be read from the dashboard (JWT) or programmatically
+  with an API key.
 """
 
 import re
@@ -37,16 +40,36 @@ def _load_user(db: Client, user_id: str) -> dict:
     return user
 
 
-async def get_current_user(
-    request: Request, db: Client = Depends(get_supabase)
-) -> dict:
-    """Resolve the current user from a JWT bearer token."""
-    token = _bearer_token(request)
+def _user_from_jwt(db: Client, token: str) -> dict:
+    """Resolve the user row from a JWT bearer token, or raise Unauthorized."""
     claims = auth_service.verify_jwt(token)
     user_id = claims.get("sub")
     if not user_id:
         raise UnauthorizedError("Token missing subject claim")
     return _load_user(db, user_id)
+
+
+def _resolve_api_key_user(db: Client, token: str) -> tuple[dict, dict]:
+    """Resolve (user, api_key row) from an `orvx_sk_` token, or raise Unauthorized."""
+    res = (
+        db.table("api_keys")
+        .select("*")
+        .eq("key_hash", hash_key(token))
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise UnauthorizedError("Invalid or revoked API key", error_code="invalid_api_key")
+    api_key = res.data[0]
+    return _load_user(db, api_key["user_id"]), api_key
+
+
+async def get_current_user(
+    request: Request, db: Client = Depends(get_supabase)
+) -> dict:
+    """Resolve the current user from a JWT bearer token."""
+    return _user_from_jwt(db, _bearer_token(request))
 
 
 def _touch_last_used(api_key_id: str) -> None:
@@ -75,24 +98,35 @@ async def get_user_from_api_key(
     if not API_KEY_RE.match(token):
         raise UnauthorizedError("Malformed API key", error_code="invalid_api_key")
 
-    res = (
-        db.table("api_keys")
-        .select("*")
-        .eq("key_hash", hash_key(token))
-        .eq("is_active", True)
-        .limit(1)
-        .execute()
-    )
-    if not res.data:
-        raise UnauthorizedError("Invalid or revoked API key", error_code="invalid_api_key")
-    api_key = res.data[0]
-
-    user = _load_user(db, api_key["user_id"])
+    user, api_key = _resolve_api_key_user(db, token)
 
     # Update last_used_at without blocking the request.
     background_tasks.add_task(_touch_last_used, api_key["id"])
 
     return {"user": user, "api_key": api_key}
+
+
+async def get_current_user_flexible(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Client = Depends(get_supabase),
+) -> dict:
+    """Resolve the current user from EITHER a JWT or an `orvx_sk_` API key.
+
+    Returns the user row (same shape as get_current_user), so account status
+    endpoints work both from the dashboard (JWT) and programmatically with an
+    API key — without forcing API clients through the wallet-signature flow.
+    The scheme is chosen by token shape: an `orvx_sk_` prefix takes the API-key
+    path, anything else is verified as a JWT.
+    """
+    token = _bearer_token(request)
+    if token.startswith("orvx_sk_"):
+        if not API_KEY_RE.match(token):
+            raise UnauthorizedError("Malformed API key", error_code="invalid_api_key")
+        user, api_key = _resolve_api_key_user(db, token)
+        background_tasks.add_task(_touch_last_used, api_key["id"])
+        return user
+    return _user_from_jwt(db, token)
 
 
 def require_admin(x_admin_key: str | None = Header(None)) -> bool:
