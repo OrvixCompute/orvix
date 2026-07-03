@@ -65,6 +65,9 @@ class Settings(BaseSettings):
         True, description="Simulate on-chain payouts instead of sending real transactions"
     )
     PAYOUT_INTERVAL_SECONDS: int = Field(300, description="Payout worker interval")
+    PAYOUT_CONFIRM_MAX_ATTEMPTS: int = Field(
+        30, description="Times to poll a payout signature for confirmation (2s apart) before flagging for review"
+    )
     TREASURY_KEYPAIR_PATH: str = Field(
         "", description="Path to the treasury keypair file (only if PAYOUT_STUB=false)"
     )
