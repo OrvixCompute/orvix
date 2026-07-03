@@ -84,6 +84,13 @@ class PaymentListener:
                 pass  # normal: timeout means "interval elapsed, poll again"
 
     async def _poll_once(self) -> None:
+        # Re-resolve the treasury's token accounts if we never got them (initial
+        # RPC error, or no USDC ATA existed yet because no deposit had arrived).
+        # Otherwise the destination safety-filter in _process_signature stays
+        # disabled for the whole run, weakening deposit attribution.
+        if not self._treasury_token_accounts:
+            await self._resolve_treasury_token_accounts()
+
         sol = get_solana_service()
         sigs = await sol.get_signatures_for_address(
             settings.TREASURY_WALLET_ADDRESS, limit=25, until=self._last_signature

@@ -50,12 +50,11 @@ class SolanaService:
         )
 
     async def get_token_accounts_by_owner(self, owner: str, mint: str) -> list[dict]:
-        return (
-            await self._rpc(
-                "getTokenAccountsByOwner",
-                [owner, {"mint": mint}, {"encoding": "jsonParsed"}],
-            )
-        ).get("value", []) or []
+        result = await self._rpc(
+            "getTokenAccountsByOwner",
+            [owner, {"mint": mint}, {"encoding": "jsonParsed"}],
+        )
+        return (result or {}).get("value", []) or []
 
     # --- Parsing helpers ---------------------------------------------------
     @staticmethod
