@@ -78,6 +78,15 @@ class SolanaService:
             [raw_b64, {"encoding": "base64", "maxRetries": 3}],
         )
 
+    async def get_signature_status(self, signature: str) -> Optional[str]:
+        """confirmationStatus of a signature ('processed'/'confirmed'/'finalized') or None."""
+        result = await self._rpc(
+            "getSignatureStatuses", [[signature], {"searchTransactionHistory": True}]
+        )
+        value = (result or {}).get("value") or [None]
+        entry = value[0]
+        return entry.get("confirmationStatus") if entry else None
+
     # --- Parsing helpers ---------------------------------------------------
     @staticmethod
     def extract_memo(parsed_tx: dict) -> Optional[str]:

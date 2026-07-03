@@ -88,3 +88,21 @@ async def test_send_usdc_real_path_builds_and_submits(monkeypatch):
 
     assert sig == "REALSIG"
     assert len(fake.sent) == 1  # exactly one serialized tx submitted
+
+
+async def test_send_usdc_ensure_dest_ata_bundles_create(monkeypatch):
+    import base64
+
+    from solders.keypair import Keypair
+    from solders.transaction import Transaction
+
+    monkeypatch.setattr(settings, "USDC_MINT_ADDRESS", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+    fake = _FakeSol(sig="S")
+    monkeypatch.setattr(wallet_module, "get_solana_service", lambda: fake)
+    ws = WalletService()
+    monkeypatch.setattr(ws, "get_keypair", lambda role: Keypair())
+
+    await ws.send_usdc("payout", TEST_OWNER, Decimal("5"), stub=False, ensure_dest_ata=True)
+
+    tx = Transaction.from_bytes(base64.b64decode(fake.sent[0]))
+    assert len(tx.message.instructions) == 2  # CreateIdempotent ATA + transferChecked

@@ -96,12 +96,23 @@ class WalletService:
             out.append({"role": role, "public_key": pub, "balance_usdc": float(usdc)})
         return out
 
-    async def send_usdc(self, from_role: str, to_owner: str, amount: Decimal, *, stub: bool) -> str:
+    async def send_usdc(
+        self,
+        from_role: str,
+        to_owner: str,
+        amount: Decimal,
+        *,
+        stub: bool,
+        ensure_dest_ata: bool = False,
+    ) -> str:
         """Send `amount` USDC from a role wallet to `to_owner`. Returns the signature.
 
         Stubbed by default (TREASURY_SWEEP_STUB / PAYOUT_STUB) — returns a fake
         signature without touching the chain. The real path builds an SPL
-        transferChecked, signs with the role keypair, and submits via RPC.
+        transferChecked, signs with the role keypair, and submits via RPC. When
+        `ensure_dest_ata` is set, a CreateIdempotent for the destination's USDC
+        ATA is bundled into the same transaction (the sender pays the rent), so
+        a recipient without a USDC account is handled atomically.
         """
         if stub:
             fake = "STUB_SEND_" + uuid.uuid4().hex[:16]
@@ -113,22 +124,28 @@ class WalletService:
 
         kp = self.get_keypair(from_role)
         mint = Pubkey.from_string(settings.USDC_MINT_ADDRESS)
+        dest_owner = Pubkey.from_string(to_owner)
         source_ata = spl.associated_token_address(kp.pubkey(), mint)
-        dest_ata = spl.associated_token_address(Pubkey.from_string(to_owner), mint)
+        dest_ata = spl.associated_token_address(dest_owner, mint)
         amount_raw = int((Decimal(amount) * (Decimal(10) ** USDC_DECIMALS)).to_integral_value())
 
-        ix = spl.transfer_checked_ix(
-            source_ata=source_ata,
-            mint=mint,
-            dest_ata=dest_ata,
-            owner=kp.pubkey(),
-            amount_raw=amount_raw,
-            decimals=USDC_DECIMALS,
+        ixs = []
+        if ensure_dest_ata:
+            ixs.append(spl.create_idempotent_ata_ix(kp.pubkey(), dest_owner, mint))
+        ixs.append(
+            spl.transfer_checked_ix(
+                source_ata=source_ata,
+                mint=mint,
+                dest_ata=dest_ata,
+                owner=kp.pubkey(),
+                amount_raw=amount_raw,
+                decimals=USDC_DECIMALS,
+            )
         )
 
         sol = get_solana_service()
         blockhash = Hash.from_string(await sol.get_latest_blockhash())
-        tx = Transaction.new_signed_with_payer([ix], kp.pubkey(), [kp], blockhash)
+        tx = Transaction.new_signed_with_payer(ixs, kp.pubkey(), [kp], blockhash)
         sig = await sol.send_raw_transaction(base64.b64encode(bytes(tx)).decode())
         logger.info("send_usdc {} {} -> {} submitted (sig={})", amount, from_role, to_owner, sig)
         return sig

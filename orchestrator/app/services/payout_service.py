@@ -19,6 +19,8 @@ from app.config import settings
 from app.database import get_supabase
 from app.exceptions import InsufficientBalanceError, RateLimitError, ValidationError
 from app.logger import logger
+from app.services.solana_service import get_solana_service
+from app.services.wallet import wallet_service
 
 
 def _now_iso() -> str:
@@ -155,10 +157,12 @@ class PayoutService:
         db.table("withdrawals").update({"status": "processing"}).eq("id", wid).execute()
         logger.info("Processing withdrawal {} ({} USDC)", wid, amount)
 
+        # Phase 1 — broadcast. A failure HERE is pre-broadcast (no funds moved),
+        # so it is safe to refund and mark failed.
         try:
             signature = await self._send_payout(w)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Withdrawal {} failed: {} — refunding", wid, exc)
+            logger.error("Withdrawal {} failed before broadcast: {} — refunding", wid, exc)
             db.rpc(
                 "settle_withdrawal",
                 {"p_user_id": user_id, "p_amount": float(amount), "p_refund": True},
@@ -168,16 +172,34 @@ class PayoutService:
             ).eq("id", wid).execute()
             return
 
-        # Success: clear from pending (no refund), record signature.
+        # Record the signature right away — past this point the funds may have
+        # moved on-chain, so we NEVER auto-refund (that would risk a double spend).
+        db.table("withdrawals").update({"solana_signature": signature}).eq("id", wid).execute()
+
+        # Phase 2 — confirm (stub payouts are treated as confirmed).
+        confirmed = settings.PAYOUT_STUB or await self._confirm(signature)
+        if not confirmed:
+            # Broadcast but unconfirmed: leave the row in 'processing'. The worker
+            # only ever picks up 'queued', so it will NOT re-send; an operator
+            # reconciles the signature on-chain and settles/refunds manually.
+            db.table("withdrawals").update(
+                {"error_message": "broadcast but unconfirmed — needs manual review"}
+            ).eq("id", wid).execute()
+            logger.error(
+                "Withdrawal {} broadcast but unconfirmed (sig={}) — left processing for review",
+                wid,
+                signature,
+            )
+            return
+
+        # Confirmed: clear the pending balance (no refund) and finalize.
         db.rpc(
             "settle_withdrawal",
             {"p_user_id": user_id, "p_amount": float(amount), "p_refund": False},
         ).execute()
         db.table("withdrawals").update(
-            {"status": "completed", "solana_signature": signature, "processed_at": _now_iso()}
+            {"status": "completed", "processed_at": _now_iso()}
         ).eq("id", wid).execute()
-
-        # Confirm the ledger transaction.
         db.table("transactions").update({"status": "confirmed", "solana_signature": signature}).eq(
             "type", "provider_payout"
         ).contains("metadata", {"withdrawal_id": str(wid)}).execute()
@@ -185,16 +207,38 @@ class PayoutService:
         logger.info("Withdrawal {} completed (sig={})", wid, signature)
 
     async def _send_payout(self, w: dict) -> str:
-        """Send the USDC transfer. Stubbed unless PAYOUT_STUB=false."""
+        """Broadcast the USDC transfer and return its signature.
+
+        Stubbed unless PAYOUT_STUB=false. The real path sends from the payout
+        wallet to the provider's destination, creating the destination USDC ATA
+        in the same transaction if it is missing. Raises only on PRE-broadcast
+        failures (bad config/keypair, RPC rejects the submit) — the caller treats
+        a raised error as safe-to-refund.
+        """
         if settings.PAYOUT_STUB:
             await asyncio.sleep(0.1)  # simulate network
             return "STUB" + uuid.uuid4().hex
-        # TODO (production): build + sign an SPL transfer with the treasury
-        # keypair (settings.TREASURY_KEYPAIR_PATH) and submit via Helius RPC,
-        # then confirm. Kept unimplemented to avoid accidental real sends.
-        raise NotImplementedError(
-            "Real payouts not implemented. Set PAYOUT_STUB=true for development."
+        return await wallet_service.send_usdc(
+            "payout",
+            w["destination_wallet"],
+            Decimal(str(w["amount"])),
+            stub=False,
+            ensure_dest_ata=True,
         )
+
+    async def _confirm(self, signature: str) -> bool:
+        """Poll for on-chain confirmation; True if confirmed/finalized in the budget."""
+        sol = get_solana_service()
+        for _ in range(settings.PAYOUT_CONFIRM_MAX_ATTEMPTS):
+            await asyncio.sleep(2)
+            try:
+                status = await sol.get_signature_status(signature)
+            except Exception as exc:  # noqa: BLE001 — transient RPC errors: keep polling
+                logger.warning("Confirm poll error for {}: {}", signature, exc)
+                continue
+            if status in ("confirmed", "finalized"):
+                return True
+        return False
 
 
 payout_service = PayoutService()
