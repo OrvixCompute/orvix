@@ -20,6 +20,7 @@ from app.services import storage_service
 from app.services.burn_service import BurnService
 from app.services.buyback_service import BuybackService
 from app.services.hot_sweeper import hot_sweeper
+from app.services.payments_overview import build_overview
 from app.services.wallet import wallet_service
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -103,3 +104,15 @@ async def treasury_sync(db: Client = Depends(get_supabase)):
 async def treasury_sweep_hot(db: Client = Depends(get_supabase)):
     """Manually trigger a hot->main sweep (stubbed unless TREASURY_SWEEP_STUB=false)."""
     return await hot_sweeper.run_once(db)
+
+
+# --- Payment-flow monitoring -----------------------------------------------
+
+@router.get("/payments/overview")
+async def payments_overview(db: Client = Depends(get_supabase)):
+    """Payment-flow snapshot: flags, treasury balances, deposits + withdrawals.
+
+    Read-only aggregation for the activation dashboard. Treasury balances are the
+    last-synced values — call POST /treasury/sync first to refresh from chain.
+    """
+    return build_overview(db)
