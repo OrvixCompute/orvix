@@ -58,6 +58,48 @@ async def test_register_success():
     finally:
         await client.stop()
         task.cancel()
+
+
+async def test_register_models_supported_defaults_to_chat_model_only():
+    captured = {}
+
+    async def handler(ws):
+        reg = parse_message(await ws.recv())
+        captured["models_supported"] = reg.models_supported
+        await ws.send(serialize(RegisterAckMessage(node_id="node-1", accepted=True)))
+        async for _ in ws:
+            pass
+
+    server, port = await _serve(handler)
+    client = OrchestratorClient(_cfg(port))
+    task = asyncio.create_task(client.start())
+    try:
+        await _wait_until(lambda: client.is_connected)
+        assert captured["models_supported"] == ["qwen-2.5-7b"]
+    finally:
+        await client.stop()
+        task.cancel()
+
+
+async def test_register_models_supported_includes_extra_models():
+    captured = {}
+
+    async def handler(ws):
+        reg = parse_message(await ws.recv())
+        captured["models_supported"] = reg.models_supported
+        await ws.send(serialize(RegisterAckMessage(node_id="node-1", accepted=True)))
+        async for _ in ws:
+            pass
+
+    server, port = await _serve(handler)
+    client = OrchestratorClient(_cfg(port), extra_models=["sdxl-lightning"])
+    task = asyncio.create_task(client.start())
+    try:
+        await _wait_until(lambda: client.is_connected)
+        assert captured["models_supported"] == ["qwen-2.5-7b", "sdxl-lightning"]
+    finally:
+        await client.stop()
+        task.cancel()
         server.close()
         await server.wait_closed()
 

@@ -145,7 +145,8 @@ async def _run_agent(cfg) -> None:
     health = HealthServer(cfg.health_port, manager=manager)
     await health.start()
 
-    client = OrchestratorClient(cfg)
+    image_models = list(engines["image"].supported_models) if "image" in engines else None
+    client = OrchestratorClient(cfg, extra_models=image_models)
 
     async def job_handler(job) -> None:
         await executor.execute(
