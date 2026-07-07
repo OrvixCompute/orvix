@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Node advertises `engines` + `vram_gb` at registration (additive, backward-compatible; image is opt-in via `enable_image_engine`)
 - `image` optional extra (diffusers/transformers/accelerate/…) and opt-in `scripts/download_flux.py` pre-download helper
 - `ModelManager` — swaps chat/image engines through a single GPU's VRAM with a swap lock, drain-before-unload, idle unload (default 10 min), and thrash detection
+- `ModelManager` concurrent mode (`max_resident` param, node config `concurrent_engines`): keeps chat + image both resident in VRAM instead of swapping, for deployments where the combined footprint fits (e.g. an AWQ-quantized chat model next to an image engine) — LRU eviction only kicks in past capacity, per-engine idle unload, `shutdown()` unloads everything resident
 - Managed vLLM mode (`vllm_managed`): the node owns the vLLM server as a subprocess so `unload()` actually frees VRAM for the image engine (start on load, kill on unload)
 - Node `/v1/status` endpoint: current engine, VRAM free/total, uptime, active jobs
 - Config: `vllm_managed`, `idle_unload_minutes`

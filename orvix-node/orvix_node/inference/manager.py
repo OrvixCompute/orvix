@@ -1,24 +1,34 @@
-"""ModelManager — swaps engines in and out of a single GPU's VRAM on demand.
+"""ModelManager — keeps up to ``max_resident`` engines in a single GPU's VRAM,
+loading (and evicting, LRU, when at capacity) on demand.
 
-Only one engine is resident at a time. When a job needs a different engine, the
-manager unloads the current one (freeing VRAM) and loads the requested one.
+Default (``max_resident=1``): only one engine is resident at a time — every
+request for a different engine unloads the current one first (a "swap"). This
+is the original single-GPU behavior for engines that can't coexist (e.g. an
+fp16 7B chat model + an image model that together exceed VRAM).
+
+``max_resident >= len(engines)`` (e.g. 2 for chat+image): every engine can stay
+resident at once — a request for an engine that isn't loaded yet just loads it
+into a free slot, without touching the others. Nothing is ever evicted unless
+capacity is actually exceeded. This is what makes concurrent chat+image serving
+possible on one GPU once the models are small enough to fit together (e.g. an
+AWQ-quantized chat model alongside an image engine).
 
 Concurrency (single ``asyncio.Condition`` guarding all state):
-  - Request for the currently-loaded engine → served immediately (fast path).
-  - Request for a different engine → the manager waits until the outgoing engine
-    has no in-flight jobs (drain), then swaps. New arrivals queue behind the swap.
-  - Several waiters for the same target share one swap.
-  - A request for the current engine that arrives *during* a swap away from it
-    waits for the swap to finish, then triggers a swap back (expensive — logged
-    via the thrash counter).
+  - Request for an already-loaded engine → served immediately (fast path).
+  - Request for an engine that needs loading, with a free slot → load it; other
+    already-resident engines are untouched.
+  - Request for an engine that needs loading, at capacity → evict the
+    least-recently-used *idle* (no in-flight jobs) resident engine, then load.
+    If every resident engine is busy, wait for one to drain.
+  - Several waiters for the same target share one load.
 
 Lock ordering: the condition's lock is the only lock. ``load``/``unload`` are
-awaited while holding it, but that is safe because a swap only begins once the
-outgoing engine is fully drained (no in-flight job can call :meth:`release`
-during the swap), so nothing contends for the lock mid-swap.
+awaited while holding it, but that is safe because an eviction only begins once
+the outgoing engine is fully drained (no in-flight job can call :meth:`release`
+mid-eviction), so nothing contends for the lock mid-transition.
 
-Idle unload frees VRAM after a period of inactivity so a mixed-traffic node does
-not pin the GPU on whichever engine ran last.
+Idle unload frees VRAM per-engine after a period of inactivity so a
+mixed-traffic node does not pin VRAM on engines that ran once and went quiet.
 """
 
 from __future__ import annotations
@@ -26,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Callable, Dict
+from typing import AsyncIterator, Callable, Dict, Optional
 
 from orvix_node.inference.base import AbstractEngine
 from orvix_node.inference.router import engine_type_for
@@ -42,13 +52,15 @@ class ModelManager:
         engines: Dict[str, AbstractEngine],
         idle_timeout_seconds: float = 600.0,
         clock: Callable[[], float] = time.monotonic,
+        max_resident: int = 1,
     ) -> None:
         self._engines = engines
         self.idle_timeout_seconds = idle_timeout_seconds
         self._clock = clock
+        self.max_resident = max_resident
 
         self._cv = asyncio.Condition()
-        self._current: str | None = None  # engine_type currently in VRAM
+        self._loaded: set[str] = set()  # engine_types currently resident in VRAM
         self._swapping = False
         self._active: Dict[str, int] = {}  # engine_type -> in-flight job count
         self._last_used: Dict[str, float] = {}
@@ -66,20 +78,19 @@ class ModelManager:
                 f"No engine registered for type {engine_type!r} (model {model_id!r})"
             )
         async with self._cv:
-            while not (self._current == engine_type and not self._swapping):
+            while not (engine_type in self._loaded and not self._swapping):
                 if self._swapping:
                     await self._cv.wait()
                     continue
-                outgoing = self._current
-                if (
-                    outgoing is not None
-                    and outgoing != engine_type
-                    and self._active.get(outgoing, 0) > 0
-                ):
-                    # Wait for in-flight jobs on the outgoing engine to drain.
+                if len(self._loaded) < self.max_resident:
+                    await self._load_locked(engine_type, model_id, evict=None)
+                    continue
+                victim = self._pick_victim(engine_type)
+                if victim is None:
+                    # Every resident engine (at capacity) is busy — wait to drain.
                     await self._cv.wait()
                     continue
-                await self._swap_locked(engine_type, model_id, outgoing)
+                await self._load_locked(engine_type, model_id, evict=victim)
             self._active[engine_type] = self._active.get(engine_type, 0) + 1
             self._last_used[engine_type] = self._clock()
             return self._engines[engine_type]
@@ -101,67 +112,80 @@ class ModelManager:
             await self.release(engine.engine_type)
 
     async def idle_check(self) -> None:
-        """Unload the resident engine if it has been idle past the timeout."""
+        """Unload any resident engine that has been idle past the timeout."""
         async with self._cv:
-            if self._current is None or self._swapping:
+            if self._swapping:
                 return
-            if self._active.get(self._current, 0) > 0:
-                return
-            idle = self._clock() - self._last_used.get(self._current, self._clock())
-            if idle <= self.idle_timeout_seconds:
-                return
-            engine_type = self._current
-            logger.info(
-                "Idle-unloading {} after {:.0f}s of inactivity", engine_type, idle
-            )
-            self._swapping = True
-            try:
-                await self._engines[engine_type].unload()
-                self._current = None
-            finally:
-                self._swapping = False
-                self._cv.notify_all()
+            now = self._clock()
+            for engine_type in list(self._loaded):
+                if self._active.get(engine_type, 0) > 0:
+                    continue
+                idle = now - self._last_used.get(engine_type, now)
+                if idle <= self.idle_timeout_seconds:
+                    continue
+                logger.info(
+                    "Idle-unloading {} after {:.0f}s of inactivity", engine_type, idle
+                )
+                self._swapping = True
+                try:
+                    await self._engines[engine_type].unload()
+                    self._loaded.discard(engine_type)
+                finally:
+                    self._swapping = False
+                    self._cv.notify_all()
 
     async def shutdown(self) -> None:
         async with self._cv:
             while self._swapping:
                 await self._cv.wait()
-            if self._current is not None:
-                await self._engines[self._current].unload()
-                self._current = None
+            for engine_type in list(self._loaded):
+                await self._engines[engine_type].unload()
+            self._loaded.clear()
             self._cv.notify_all()
 
     def status(self) -> dict:
         now = self._clock()
+        loaded = sorted(self._loaded)
         return {
-            "current_engine": self._current,
+            # Preserved for single-engine (max_resident=1) callers: the one
+            # resident engine, or None. Ambiguous (and thus None) once more
+            # than one engine is resident — see loaded_engines for that case.
+            "current_engine": loaded[0] if len(loaded) == 1 else None,
+            "loaded_engines": loaded,
             "swapping": self._swapping,
             "engines": list(self._engines),
             "active_jobs": dict(self._active),
-            "idle_seconds": (
-                round(now - self._last_used[self._current], 1)
-                if self._current and self._current in self._last_used
-                else None
-            ),
+            "idle_seconds": {
+                e: round(now - self._last_used[e], 1) for e in loaded if e in self._last_used
+            },
             "idle_timeout_seconds": self.idle_timeout_seconds,
             "swaps_last_minute": self._swaps_in_window(now),
         }
 
     # --- internals (must hold self._cv) -----------------------------------
-    async def _swap_locked(
-        self, engine_type: str, model_id: str, outgoing: str | None
+    def _pick_victim(self, engine_type: str) -> Optional[str]:
+        """Least-recently-used *idle* resident engine, or None if all are busy."""
+        candidates = [
+            e for e in self._loaded if e != engine_type and self._active.get(e, 0) == 0
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda e: self._last_used.get(e, 0.0))
+
+    async def _load_locked(
+        self, engine_type: str, model_id: str, evict: Optional[str]
     ) -> None:
         self._swapping = True
         try:
-            if outgoing is not None:
-                logger.info("Unloading {} to free VRAM for {}", outgoing, engine_type)
-                await self._engines[outgoing].unload()
-                self._current = None
+            if evict is not None:
+                logger.info("Unloading {} to free VRAM for {}", evict, engine_type)
+                await self._engines[evict].unload()
+                self._loaded.discard(evict)
             self._record_swap()
             logger.info("Loading {} ({})", engine_type, model_id)
             load_start = self._clock()
             await self._engines[engine_type].load(model_id)
-            self._current = engine_type
+            self._loaded.add(engine_type)
             logger.info(
                 "Loaded {} in {:.1f}s", engine_type, self._clock() - load_start
             )

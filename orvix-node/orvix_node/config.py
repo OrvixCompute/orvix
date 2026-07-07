@@ -62,6 +62,11 @@ class NodeConfig(BaseModel):
     vllm_managed: bool = False
     # Unload the resident engine after this many idle minutes to free VRAM.
     idle_unload_minutes: int = 10
+    # Keep chat + image both resident in VRAM instead of swapping between
+    # them. Only enable this once you've confirmed both engines' combined
+    # VRAM footprint fits the GPU (e.g. an AWQ/quantized chat model next to
+    # an image engine) — the manager does not check this for you.
+    concurrent_engines: bool = False
     # Where generated images are written before the orchestrator fetches them.
     image_tmp_dir: str = "/tmp/node-images"
     # Externally reachable base URL for this node's binary endpoint (the
