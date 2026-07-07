@@ -96,10 +96,12 @@ async def _run_agent(cfg) -> None:
 
     engines = {"chat": chat_engine}
     if cfg.enable_image_engine:
-        from orvix_node.inference.flux import FluxEngine
+        from orvix_node.inference.sdxl_lightning import SDXLLightningEngine
 
-        engines["image"] = FluxEngine()
-        logger.info("Image engine (Flux) enabled — chat<->image will swap on demand.")
+        engines["image"] = SDXLLightningEngine()
+        logger.info(
+            "Image engine (SDXL Lightning) enabled — chat<->image will swap on demand."
+        )
 
     manager = ModelManager(
         engines, idle_timeout_seconds=cfg.idle_unload_minutes * 60
