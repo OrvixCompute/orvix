@@ -12,6 +12,7 @@ import click
 
 from orvix_node.config import config_path, init_config_file, load_config
 from orvix_node.exceptions import AuthError, ConfigError
+from orvix_node.inference.router import models_for_engine
 from orvix_node.version import __version__
 
 
@@ -145,7 +146,12 @@ async def _run_agent(cfg) -> None:
     health = HealthServer(cfg.health_port, manager=manager)
     await health.start()
 
-    image_models = list(engines["image"].supported_models) if "image" in engines else None
+    # Advertise every catalog id the router maps to "image", not just this
+    # engine's own upstream model — the concrete image engine ignores the
+    # requested id anyway (see SDXLLightningEngine/FluxEngine.load), and
+    # clients/frontends may still request an older catalog id (e.g.
+    # "flux-schnell") that now routes to whichever image engine is running.
+    image_models = models_for_engine("image") if "image" in engines else None
     client = OrchestratorClient(cfg, extra_models=image_models)
 
     async def job_handler(job) -> None:
