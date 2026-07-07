@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unified engine lifecycle to `load(model_id)` / `unload` / `is_loaded` across all engines (renamed from `initialize`/`is_ready`/`shutdown`)
 - The executor no longer owns a single backend; it routes each job through the `ModelManager`, loading/swapping the right engine on demand
 - Default image model swapped from `flux-schnell` to `sdxl-lightning` (`ImageGenerationRequest` default, node's registered image engine); `flux-schnell` stays in the catalog and router for backward compatibility
+- `ModelManager` no longer holds its lock during the actual `load()`/`unload()` I/O — state transitions are decided and committed under the lock, but the slow work runs with it released. In concurrent mode this was a real bug: a ~60s image cold-load blocked *every* other request (including one for an already-resident, untouched chat engine) because the single lock covering the whole load spanned the entire I/O
 
 ## [0.2.0] — 2026-06-26 — Whitepaper Alignment
 

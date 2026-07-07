@@ -252,6 +252,45 @@ async def test_idle_check_unloads_each_engine_independently():
     assert mgr.status()["loaded_engines"] == []
 
 
+async def test_already_loaded_engine_not_blocked_by_concurrent_load():
+    """Regression test: acquiring an already-resident engine must not wait on
+    an unrelated engine's slow concurrent load — only requests for the engine
+    actually being loaded should block."""
+
+    class SlowLoadEngine(FakeEngine):
+        def __init__(self, engine_type: str):
+            super().__init__(engine_type)
+            self.load_gate = asyncio.Event()
+
+        async def load(self, model_id: str) -> None:
+            await self.load_gate.wait()  # simulates a slow cold load
+            await super().load(model_id)
+
+    chat = FakeEngine("chat")
+    img = SlowLoadEngine("image")
+    mgr = ModelManager({"chat": chat, "image": img}, max_resident=2)
+
+    # Warm chat up front so it's already resident.
+    async with mgr.serving("qwen-2.5-7b"):
+        pass
+
+    # Kick off a slow image load; it will hang on load_gate until released.
+    img_task = asyncio.create_task(mgr.acquire("flux-schnell"))
+    await asyncio.sleep(0.05)
+    assert not img_task.done()
+
+    # Chat must still be served immediately — it is not touched by the image
+    # load and must not be blocked by the manager's internal lock.
+    chat_engine = await asyncio.wait_for(mgr.acquire("qwen-2.5-7b"), timeout=0.2)
+    assert chat_engine is chat
+    await mgr.release("chat")
+
+    img.load_gate.set()
+    img_engine = await asyncio.wait_for(img_task, timeout=1)
+    assert img_engine is img
+    await mgr.release("image")
+
+
 async def test_shutdown_unloads_all_resident_engines():
     chat, img = FakeEngine("chat"), FakeEngine("image")
     mgr = ModelManager({"chat": chat, "image": img}, max_resident=2)
