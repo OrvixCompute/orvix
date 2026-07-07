@@ -16,6 +16,7 @@ Config (env / constructor):
 
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 import time
@@ -58,7 +59,14 @@ class SDXLLightningEngine(ImageEngine):
         # uniformity but not otherwise used.
         if self._pipe is not None:
             return
-        # Lazy heavy imports — only needed when actually serving on a GPU.
+        # Run the (synchronous, ~minute-long) load in a thread so it doesn't
+        # block the event loop — the client's heartbeat/WS traffic runs on the
+        # same loop, and starving it this long reads to the orchestrator as a
+        # dead connection even though the node is fine.
+        loop = asyncio.get_event_loop()
+        self._pipe = await loop.run_in_executor(None, self._load_sync)
+
+    def _load_sync(self):
         import torch
         from diffusers import (
             EulerDiscreteScheduler,
@@ -93,8 +101,8 @@ class SDXLLightningEngine(ImageEngine):
         pipe.scheduler = EulerDiscreteScheduler.from_config(
             pipe.scheduler.config, timestep_spacing="trailing"
         )
-        self._pipe = pipe
         logger.info("SDXL Lightning loaded.")
+        return pipe
 
     async def unload(self) -> None:
         if self._pipe is None:

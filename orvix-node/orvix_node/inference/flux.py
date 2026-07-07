@@ -15,6 +15,7 @@ Config (env / constructor):
 
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 import time
@@ -54,7 +55,12 @@ class FluxEngine(ImageEngine):
         # for interface uniformity but not otherwise used.
         if self._pipe is not None:
             return
-        # Lazy heavy imports — only needed when actually serving on a GPU.
+        # Run the (synchronous, potentially minutes-long) load in a thread so
+        # it doesn't block the event loop — see SDXLLightningEngine for why.
+        loop = asyncio.get_event_loop()
+        self._pipe = await loop.run_in_executor(None, self._load_sync)
+
+    def _load_sync(self):
         import torch
         from diffusers import FluxPipeline
 
@@ -69,8 +75,8 @@ class FluxEngine(ImageEngine):
             cache_dir=self.cache_dir,
         )
         pipe.to(self.device)
-        self._pipe = pipe
         logger.info("Flux Schnell loaded.")
+        return pipe
 
     async def unload(self) -> None:
         if self._pipe is None:
