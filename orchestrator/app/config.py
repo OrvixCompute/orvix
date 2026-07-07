@@ -139,6 +139,16 @@ class Settings(BaseSettings):
         "https://orvix.network/tokenomics", description="Shown when image access needs ORVX"
     )
 
+    # --- Chat generation -----------------------------------------------
+    CHAT_JOB_TIMEOUT: int = Field(
+        60,
+        description=(
+            "Seconds to wait for a node to complete a chat job. Raise this if "
+            "nodes swap between chat/image engines and the swap-back (e.g. a "
+            "managed vLLM cold start) can exceed the default."
+        ),
+    )
+
     # --- Image generation --------------------------------------------------
     IMAGE_JOB_TIMEOUT: int = Field(
         90, description="Seconds to wait for a node to complete an image job"

@@ -35,7 +35,7 @@ from app.models.protocol import (
 # Sentinel pushed onto a streaming queue to signal "no more chunks".
 _STREAM_END = object()
 
-JOB_TIMEOUT_S = 60.0
+JOB_TIMEOUT_S = float(settings.CHAT_JOB_TIMEOUT)
 HEARTBEAT_STALE_S = 60.0
 HEALTH_CHECK_INTERVAL_S = 30.0
 # Tiers that get preferential (least-loaded) node selection.
