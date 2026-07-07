@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class ImageGenerationRequest(BaseModel):
-    model: str = "flux-schnell"
+    model: str = "sdxl-lightning"
     prompt: str = Field(..., min_length=1)
     n: int = Field(1, ge=1, le=4)
     size: str = "1024x1024"
