@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from orvix_node.health import create_health_app
+from orvix_node.health import HealthServer, create_health_app
 from orvix_node.inference.manager import ModelManager
+
+
+def test_health_server_binds_all_interfaces_by_default():
+    # Must be reachable from outside the container (the orchestrator fetches
+    # images through the provider's port-forward/proxy), not just loopback.
+    server = HealthServer(port=9000)
+    assert server._host == "0.0.0.0"
 
 
 def test_health_endpoint_ok():
