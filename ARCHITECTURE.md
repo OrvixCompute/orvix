@@ -185,10 +185,12 @@ transfer channel:
 1. **Dispatch** — `POST /v1/images/generations` selects an image-capable node
    (advertised via `engines` at registration) and sends `job.image.dispatch`
    over the WebSocket, carrying a per-job `binary_token`.
-2. **Generate** — the node runs the Flux engine (swapped into VRAM by the
-   ModelManager, freeing the chat engine if needed), writes the PNG to
+2. **Generate** — the node runs the SDXL Lightning engine (swapped into VRAM
+   by the ModelManager, freeing the chat engine if needed, unless
+   concurrent mode keeps both resident), writes the PNG to
    `/tmp/node-images/<id>.png`, and replies `job.image.complete` with a
-   `binary_url`.
+   `binary_url`. (The earlier Flux Schnell engine remains in the codebase,
+   unregistered, for a possible future gated-access re-enable.)
 3. **Fetch** — the orchestrator GETs `binary_url` with the token as
    `X-Node-Secret`; the node streams the bytes and deletes its temp file.
 4. **Store** — the orchestrator saves to `IMAGE_STORAGE_DIR`, records an
