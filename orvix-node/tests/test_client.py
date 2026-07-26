@@ -92,11 +92,11 @@ async def test_register_models_supported_includes_extra_models():
             pass
 
     server, port = await _serve(handler)
-    client = OrchestratorClient(_cfg(port), extra_models=["sdxl-lightning"])
+    client = OrchestratorClient(_cfg(port), extra_models=["orvix-image-1"])
     task = asyncio.create_task(client.start())
     try:
         await _wait_until(lambda: client.is_connected)
-        assert captured["models_supported"] == ["qwen-2.5-7b", "sdxl-lightning"]
+        assert captured["models_supported"] == ["qwen-2.5-7b", "orvix-image-1"]
     finally:
         await client.stop()
         task.cancel()

@@ -97,11 +97,11 @@ async def _run_agent(cfg) -> None:
 
     engines = {"chat": chat_engine}
     if cfg.enable_image_engine:
-        from orvix_node.inference.sdxl_lightning import SDXLLightningEngine
+        from orvix_node.inference.orvix_image import OrvixImageEngine
 
-        engines["image"] = SDXLLightningEngine()
+        engines["image"] = OrvixImageEngine()
         mode = "resident concurrently" if cfg.concurrent_engines else "swap on demand"
-        logger.info("Image engine (SDXL Lightning) enabled — chat<->image will {}.", mode)
+        logger.info("Image engine enabled — chat<->image will {}.", mode)
 
     max_resident = len(engines) if cfg.concurrent_engines else 1
     manager = ModelManager(
@@ -155,7 +155,7 @@ async def _run_agent(cfg) -> None:
 
     # Advertise every catalog id the router maps to "image", not just this
     # engine's own upstream model — the concrete image engine ignores the
-    # requested id anyway (see SDXLLightningEngine/FluxEngine.load), and
+    # requested id anyway (see OrvixImageEngine/FluxEngine.load), and
     # clients/frontends may still request an older catalog id (e.g.
     # "flux-schnell") that now routes to whichever image engine is running.
     image_models = models_for_engine("image") if "image" in engines else None

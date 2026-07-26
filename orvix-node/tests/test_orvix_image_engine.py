@@ -1,7 +1,7 @@
-"""Unit tests for SDXLLightningEngine with torch/diffusers/hub deps mocked (no
+"""Unit tests for OrvixImageEngine with torch/diffusers/hub deps mocked (no
 GPU, no real deps).
 
-SDXLLightningEngine imports its heavy deps lazily inside load()/infer(), so we
+OrvixImageEngine imports its heavy deps lazily inside load()/infer(), so we
 inject fake modules into sys.modules before exercising those paths — mirrors
 test_flux_engine.py.
 """
@@ -14,7 +14,7 @@ import types
 import pytest
 
 from orvix_node.inference.base import ImageRequest, ImageResult
-from orvix_node.inference.sdxl_lightning import SDXLLightningEngine
+from orvix_node.inference.orvix_image import OrvixImageEngine
 
 
 class _FakeImage:
@@ -139,20 +139,20 @@ def _install_fakes(monkeypatch, pipe=None, unet=None):
 
 def test_engine_metadata():
     # Class-level metadata must not require importing torch/diffusers.
-    assert SDXLLightningEngine.engine_type == "image"
-    assert SDXLLightningEngine.required_vram_gb == 10.0
-    assert SDXLLightningEngine.supported_models == ["sdxl-lightning"]
+    assert OrvixImageEngine.engine_type == "image"
+    assert OrvixImageEngine.required_vram_gb == 10.0
+    assert OrvixImageEngine.supported_models == ["orvix-image-1"]
 
 
 async def test_infer_before_load_raises():
-    engine = SDXLLightningEngine()
+    engine = OrvixImageEngine()
     with pytest.raises(RuntimeError, match="not loaded"):
         await engine.infer(ImageRequest(prompt="hi"))
 
 
 async def test_load_then_infer(monkeypatch):
     pipe, unet, captured, counter, fake_state_dict = _install_fakes(monkeypatch)
-    engine = SDXLLightningEngine(
+    engine = OrvixImageEngine(
         base_model="acme/sdxl-base", cache_dir="/tmp/sdxl", device="cuda"
     )
 
@@ -183,7 +183,7 @@ async def test_load_then_infer(monkeypatch):
     assert result.metadata["steps"] == 4
     assert result.metadata["guidance_scale"] == 0.0
     assert result.metadata["width"] == 512
-    assert result.metadata["model"] == "sdxl-lightning"
+    assert result.metadata["model"] == "orvix-image-1"
     assert isinstance(result.metadata["generation_time_seconds"], float)
 
     call = pipe.calls[0]
@@ -196,7 +196,7 @@ async def test_load_then_infer(monkeypatch):
 
 async def test_load_is_idempotent(monkeypatch):
     _, _, _, counter, _ = _install_fakes(monkeypatch)
-    engine = SDXLLightningEngine()
+    engine = OrvixImageEngine()
     await engine.load()
     await engine.load()
     assert counter["from_pretrained"] == 1  # second load is a no-op
@@ -204,7 +204,7 @@ async def test_load_is_idempotent(monkeypatch):
 
 async def test_unload_frees_and_is_idempotent(monkeypatch):
     _install_fakes(monkeypatch)
-    engine = SDXLLightningEngine()
+    engine = OrvixImageEngine()
     await engine.load()
     assert await engine.is_loaded() is True
     await engine.unload()
@@ -215,7 +215,7 @@ async def test_unload_frees_and_is_idempotent(monkeypatch):
 
 async def test_infer_without_seed_uses_no_generator(monkeypatch):
     pipe, _, _, _, _ = _install_fakes(monkeypatch)
-    engine = SDXLLightningEngine()
+    engine = OrvixImageEngine()
     await engine.load()
     await engine.infer(ImageRequest(prompt="no seed"))
     assert pipe.calls[0]["generator"] is None

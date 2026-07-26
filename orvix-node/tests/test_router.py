@@ -14,7 +14,7 @@ from orvix_node.inference.router import (
 def test_engine_type_for_known_models():
     assert engine_type_for("qwen-2.5-7b") == "chat"
     assert engine_type_for("flux-schnell") == "image"
-    assert engine_type_for("sdxl-lightning") == "image"
+    assert engine_type_for("orvix-image-1") == "image"
 
 
 def test_engine_type_for_unknown_raises():
@@ -23,7 +23,7 @@ def test_engine_type_for_unknown_raises():
 
 
 def test_models_for_engine():
-    assert models_for_engine("image") == ["flux-schnell", "sdxl-lightning"]
+    assert models_for_engine("image") == ["flux-schnell", "orvix-image-1"]
     assert "qwen-2.5-7b" in models_for_engine("chat")
 
 

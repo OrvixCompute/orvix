@@ -56,7 +56,7 @@ class FluxEngine(ImageEngine):
         if self._pipe is not None:
             return
         # Run the (synchronous, potentially minutes-long) load in a thread so
-        # it doesn't block the event loop — see SDXLLightningEngine for why.
+        # it doesn't block the event loop — see OrvixImageEngine for why.
         loop = asyncio.get_event_loop()
         self._pipe = await loop.run_in_executor(None, self._load_sync)
 

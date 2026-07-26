@@ -1,17 +1,17 @@
-"""SDXL Lightning image engine — Diffusers-backed text-to-image, 4-step distilled.
+"""Orvix's default image engine — Diffusers-backed text-to-image, 4-step distilled.
 
-SDXL Lightning (ByteDance) swaps a distilled Lightning UNet checkpoint into a
-stock SDXL base pipeline for fast, guidance-free generation. Chosen over Flux
-Schnell for pod activation: no HuggingFace access gate, a smaller on-disk
-footprint, and it fits comfortably in less VRAM (fp16).
+Swaps a distilled fast-inference UNet checkpoint into a stock SDXL base
+pipeline for fast, guidance-free generation. Chosen over the earlier engine
+for pod activation: no gated upstream access, a smaller on-disk footprint,
+and it fits comfortably in less VRAM (fp16).
 
 Heavy GPU dependencies (torch, diffusers, safetensors) are imported lazily
 inside load()/infer(), mirroring FluxEngine, so importing this module never
 requires a GPU or the `image` extra to be installed.
 
 Config (env / constructor):
-  - ORVIX_NODE_SDXL_BASE_MODEL   base pipeline repo (default stabilityai/stable-diffusion-xl-base-1.0)
-  - ORVIX_NODE_SDXL_CACHE_DIR    local model cache (default ./models/sdxl-lightning)
+  - ORVIX_NODE_IMAGE_BASE_MODEL  base pipeline repo (default stabilityai/stable-diffusion-xl-base-1.0)
+  - ORVIX_NODE_IMAGE_CACHE_DIR   local model cache (default ./models/orvix-image)
 """
 
 from __future__ import annotations
@@ -26,15 +26,15 @@ from orvix_node.inference.base import ImageEngine, ImageRequest, ImageResult
 from orvix_node.logger import logger
 
 _DEFAULT_BASE_MODEL = "stabilityai/stable-diffusion-xl-base-1.0"
-_DEFAULT_CACHE_DIR = "./models/sdxl-lightning"
-_LIGHTNING_REPO = "ByteDance/SDXL-Lightning"
-_LIGHTNING_CKPT = "sdxl_lightning_4step_unet.safetensors"
-_LIGHTNING_STEPS = 4  # fixed: the 4-step UNet checkpoint requires exactly this
+_DEFAULT_CACHE_DIR = "./models/orvix-image"
+_CKPT_REPO = "ByteDance/SDXL-Lightning"
+_CKPT_FILE = "sdxl_lightning_4step_unet.safetensors"
+_CKPT_STEPS = 4  # fixed: the distilled UNet checkpoint requires exactly this
 
 
-class SDXLLightningEngine(ImageEngine):
+class OrvixImageEngine(ImageEngine):
     required_vram_gb = 10.0
-    supported_models = ["sdxl-lightning"]
+    supported_models = ["orvix-image-1"]
 
     def __init__(
         self,
@@ -44,16 +44,16 @@ class SDXLLightningEngine(ImageEngine):
     ) -> None:
         self.base_model = (
             base_model
-            or os.environ.get("ORVIX_NODE_SDXL_BASE_MODEL")
+            or os.environ.get("ORVIX_NODE_IMAGE_BASE_MODEL")
             or _DEFAULT_BASE_MODEL
         )
         self.cache_dir = (
-            cache_dir or os.environ.get("ORVIX_NODE_SDXL_CACHE_DIR") or _DEFAULT_CACHE_DIR
+            cache_dir or os.environ.get("ORVIX_NODE_IMAGE_CACHE_DIR") or _DEFAULT_CACHE_DIR
         )
         self.device = device
         self._pipe = None  # diffusers StableDiffusionXLPipeline once loaded
 
-    async def load(self, model_id: str = "sdxl-lightning") -> None:
+    async def load(self, model_id: str = "orvix-image-1") -> None:
         # ``model_id`` is the orchestrator-facing catalog id; the upstream repos
         # are fixed on this engine, so the argument is accepted for interface
         # uniformity but not otherwise used.
@@ -77,16 +77,16 @@ class SDXLLightningEngine(ImageEngine):
         from safetensors.torch import load_file
 
         logger.info(
-            "Loading SDXL Lightning ({} + {}) into VRAM (fp16, cache={})...",
+            "Loading image model ({} + {}) into VRAM (fp16, cache={})...",
             self.base_model,
-            _LIGHTNING_CKPT,
+            _CKPT_FILE,
             self.cache_dir,
         )
         unet = UNet2DConditionModel.from_config(
             self.base_model, subfolder="unet", cache_dir=self.cache_dir
         ).to(self.device, torch.float16)
         ckpt_path = hf_hub_download(
-            _LIGHTNING_REPO, _LIGHTNING_CKPT, cache_dir=self.cache_dir
+            _CKPT_REPO, _CKPT_FILE, cache_dir=self.cache_dir
         )
         unet.load_state_dict(load_file(ckpt_path, device=self.device))
 
@@ -101,7 +101,7 @@ class SDXLLightningEngine(ImageEngine):
         pipe.scheduler = EulerDiscreteScheduler.from_config(
             pipe.scheduler.config, timestep_spacing="trailing"
         )
-        logger.info("SDXL Lightning loaded.")
+        logger.info("Image model loaded.")
         return pipe
 
     async def unload(self) -> None:
@@ -119,14 +119,14 @@ class SDXLLightningEngine(ImageEngine):
                 torch.cuda.empty_cache()
         except Exception:  # noqa: BLE001 — best-effort VRAM reclaim
             pass
-        logger.info("SDXL Lightning unloaded.")
+        logger.info("Image model unloaded.")
 
     async def is_loaded(self) -> bool:
         return self._pipe is not None
 
     async def infer(self, request: ImageRequest) -> ImageResult:
         if self._pipe is None:
-            raise RuntimeError("SDXL Lightning engine not loaded — call load() first")
+            raise RuntimeError("Image engine not loaded — call load() first")
 
         import torch
 
@@ -139,7 +139,7 @@ class SDXLLightningEngine(ImageEngine):
             prompt=request.prompt,
             width=request.width,
             height=request.height,
-            num_inference_steps=_LIGHTNING_STEPS,
+            num_inference_steps=_CKPT_STEPS,
             guidance_scale=0.0,
             generator=generator,
         )
@@ -153,11 +153,11 @@ class SDXLLightningEngine(ImageEngine):
             png_bytes=buf.getvalue(),
             metadata={
                 "seed": request.seed,
-                "steps": _LIGHTNING_STEPS,
+                "steps": _CKPT_STEPS,
                 "width": request.width,
                 "height": request.height,
                 "generation_time_seconds": round(elapsed, 2),
-                "model": "sdxl-lightning",
+                "model": "orvix-image-1",
                 "guidance_scale": 0.0,
             },
         )

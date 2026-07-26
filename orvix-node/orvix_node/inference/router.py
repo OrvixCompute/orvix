@@ -14,7 +14,7 @@ from typing import Dict, List
 MODEL_TO_ENGINE: Dict[str, str] = {
     "qwen-2.5-7b": "chat",
     "flux-schnell": "image",
-    "sdxl-lightning": "image",
+    "orvix-image-1": "image",
 }
 
 ENGINE_TYPES = ("chat", "image")

@@ -81,7 +81,7 @@ Image generation works the same way, OpenAI DALL-E-compatible:
 curl -X POST https://api.orvix.network/v1/images/generations \
   -H "Authorization: Bearer orvx_sk_your_key_here" \
   -H "Content-Type: application/json" \
-  -d '{"model": "sdxl-lightning", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'
+  -d '{"model": "orvix-image-1", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'
 ```
 
 See [docs/api-reference.md](docs/api-reference.md) for the full endpoint list.
@@ -101,7 +101,7 @@ orvix-node start
 - **Backend:** Python 3.11+, FastAPI, Supabase (PostgreSQL), Solana via `solders` (wallet auth)
 - **Transport:** WebSocket between orchestrator and nodes
 - **Inference:** vLLM for chat (Qwen, Mistral, Llama families) and Diffusers for image
-  generation (SDXL Lightning)
+  generation
 - **Node:** asyncio, `websockets`, GPU detection with a stub mode for GPU-less development
 
 ## 📍 Project status
@@ -114,9 +114,9 @@ https://orvix.network. The ORVX utility model is implemented: provider staking (
 ORVX minimum), stake-based pricing tiers, a 70/30 revenue split feeding a 50/30/20
 buyback/treasury/operations flow, manual buyback (Jupiter) and monthly burn tooling, and
 Snapshot-based governance. On-chain buyback/burn execution is stub-gated pending devnet
-testing. Real GPU inference is implemented for chat (vLLM) and image generation (SDXL
-Lightning) and has been verified end-to-end on a GPU node; keeping a node continuously
-online in production is the next milestone. See [CHANGELOG.md](CHANGELOG.md) and
+testing. Real GPU inference is implemented for chat (vLLM) and image generation and has
+been verified end-to-end on a GPU node; keeping a node continuously online in production
+is the next milestone. See [CHANGELOG.md](CHANGELOG.md) and
 [docs/tokenomics.md](docs/tokenomics.md).
 
 ## ⚠️ Alpha state disclosures

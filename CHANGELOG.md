@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Node multi-engine architecture: `AbstractEngine` base with `ChatEngine`/`ImageEngine` families and a `model_id → engine_type` router (foundation for image generation)
 - `FluxEngine` — Flux Schnell text-to-image via Diffusers (bfloat16, 1024×1024 / 4 steps defaults); heavy GPU deps imported lazily
-- `SDXLLightningEngine` — SDXL Lightning (ByteDance) 4-step text-to-image via Diffusers (fp16, guidance-free); no HuggingFace access gate and a smaller on-disk footprint than Flux Schnell, so it is the node's default registered image engine (`FluxEngine` stays in the codebase, unregistered, for a future gated-access re-enable)
+- `OrvixImageEngine` — 4-step distilled text-to-image via Diffusers (fp16, guidance-free); no gated upstream access and a smaller on-disk footprint than Flux Schnell, so it is the node's default registered image engine (`FluxEngine` stays in the codebase, unregistered, for a future gated-access re-enable)
 - Node advertises `engines` + `vram_gb` at registration (additive, backward-compatible; image is opt-in via `enable_image_engine`)
 - `image` optional extra (diffusers/transformers/accelerate/…) and opt-in `scripts/download_flux.py` pre-download helper
 - `ModelManager` — swaps chat/image engines through a single GPU's VRAM with a swap lock, drain-before-unload, idle unload (default 10 min), and thrash detection
@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Node `/v1/status` endpoint: current engine, VRAM free/total, uptime, active jobs
 - Config: `vllm_managed`, `idle_unload_minutes`
 - **Image generation (orchestrator):** `POST /v1/images/generations` (OpenAI DALL-E-compatible) — dispatches to an image-capable node, fetches the PNG from the node's binary endpoint, saves it, returns URL/b64
-- `GET /v1/models` catalog endpoint (chat + `flux-schnell`/`sdxl-lightning` image models)
+- `GET /v1/models` catalog endpoint (chat + `flux-schnell`/`orvix-image-1` image models)
 - Protocol messages `job.image.dispatch` / `job.image.complete` / `job.image.failed`; `RegisterMessage` gains optional `engines[]` + `vram_gb`
 - Node binary endpoint `GET /v1/binary/image/<id>` (per-job `X-Node-Secret` token, stream-then-delete) + node image job handler
 - Node manager reads node capabilities and routes image jobs only to image-capable nodes
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Unified engine lifecycle to `load(model_id)` / `unload` / `is_loaded` across all engines (renamed from `initialize`/`is_ready`/`shutdown`)
 - The executor no longer owns a single backend; it routes each job through the `ModelManager`, loading/swapping the right engine on demand
-- Default image model swapped from `flux-schnell` to `sdxl-lightning` (`ImageGenerationRequest` default, node's registered image engine); `flux-schnell` stays in the catalog and router for backward compatibility
+- Default image model swapped from `flux-schnell` to `orvix-image-1` (`ImageGenerationRequest` default, node's registered image engine); `flux-schnell` stays in the catalog and router for backward compatibility
 - `ModelManager` no longer holds its lock during the actual `load()`/`unload()` I/O — state transitions are decided and committed under the lock, but the slow work runs with it released. In concurrent mode this was a real bug: a ~60s image cold-load blocked *every* other request (including one for an already-resident, untouched chat engine) because the single lock covering the whole load spanned the entire I/O
 
 ## [0.2.0] — 2026-06-26 — Whitepaper Alignment

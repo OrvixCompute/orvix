@@ -51,7 +51,7 @@ class NodeConfig(BaseModel):
     json_logs: bool = False
     # Inference backend: "mock" (default) or "vllm".
     backend: str = "mock"
-    # Advertise image (SDXL Lightning) capability at registration. Opt-in: only enable once
+    # Advertise image-generation capability at registration. Opt-in: only enable once
     # the ModelManager swap logic is deployed, else the node would advertise an
     # engine it cannot yet serve. Dual-mode (chat + image on one GPU) also needs
     # vllm_managed=true so the manager can free VRAM by stopping the vLLM server.
@@ -153,7 +153,7 @@ max_concurrent_jobs: 4
 backend: "mock"        # "mock" or "vllm"
 
 # Engines / VRAM (single-GPU swap):
-enable_image_engine: false   # advertise + serve SDXL Lightning images (needs vllm_managed for dual-mode)
+enable_image_engine: false   # advertise + serve image generation (needs vllm_managed for dual-mode)
 vllm_managed: false          # node owns the vLLM server subprocess (kill on unload to free VRAM)
 idle_unload_minutes: 10      # unload the resident engine after this many idle minutes
 

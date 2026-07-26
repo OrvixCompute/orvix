@@ -185,7 +185,7 @@ transfer channel:
 1. **Dispatch** — `POST /v1/images/generations` selects an image-capable node
    (advertised via `engines` at registration) and sends `job.image.dispatch`
    over the WebSocket, carrying a per-job `binary_token`.
-2. **Generate** — the node runs the SDXL Lightning engine (swapped into VRAM
+2. **Generate** — the node runs the default image engine (swapped into VRAM
    by the ModelManager, freeing the chat engine if needed, unless
    concurrent mode keeps both resident), writes the PNG to
    `/tmp/node-images/<id>.png`, and replies `job.image.complete` with a

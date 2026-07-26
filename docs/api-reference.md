@@ -326,12 +326,12 @@ Bearer orvx_sk_...`.
 curl -X POST https://api.orvix.network/v1/images/generations \
   -H "Authorization: Bearer orvx_sk_..." \
   -H "Content-Type: application/json" \
-  -d '{"model": "sdxl-lightning", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'
+  -d '{"model": "orvix-image-1", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'
 ```
 
-Request: `model` (`sdxl-lightning`, default; `flux-schnell` also defined in
+Request: `model` (`orvix-image-1`, default; `flux-schnell` also defined in
 the catalog but not currently served by any node), `prompt`, `n` (1–4),
-`size` (up to `1024x1024` for `sdxl-lightning`, up to `1536x1536` for
+`size` (up to `1024x1024` for `orvix-image-1`, up to `1536x1536` for
 `flux-schnell`), `response_format` (`url` | `b64_json`).
 
 Response: `{"created": ..., "data": [{"url": "https://orvix.network/images/<id>.png"}]}`.
