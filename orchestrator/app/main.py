@@ -41,6 +41,7 @@ from app.routes import (
     images,
     inference,
     models,
+    network,
     node,
     provider,
     staking,
@@ -108,3 +109,4 @@ app.include_router(staking.router)
 app.include_router(account.router)
 app.include_router(admin.router)
 app.include_router(governance.router)
+app.include_router(network.router)

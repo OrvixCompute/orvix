@@ -190,6 +190,19 @@ class Settings(BaseSettings):
         False, description="Start the daily hot-wallet sweeper (usually run via systemd timer instead)"
     )
 
+    # --- Public network stats ----------------------------------------------
+    NETWORK_STATS_CACHE_SECONDS: int = Field(
+        30,
+        description=(
+            "How long GET /v1/network/stats is served from cache. The endpoint is "
+            "public and unauthenticated, so the cache is what keeps the aggregation "
+            "off the database on every page load. Set to 0 to disable."
+        ),
+    )
+    NETWORK_STATS_WINDOW_HOURS: int = Field(
+        24, description="Rolling window for the *_window counters in /v1/network/stats"
+    )
+
     # --- Governance (Snapshot.org) -----------------------------------------
     GOVERNANCE_SNAPSHOT_SPACE: str = Field(
         "orvix", description="Snapshot space slug for ORVX governance"

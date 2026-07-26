@@ -200,6 +200,56 @@ Return the Snapshot space slug and URL for off-chain voting. No auth required.
 
 ---
 
+## Network
+
+### `GET /v1/network/stats`
+Public dashboard feed for the network's compute side — node/GPU capacity,
+request and token volume, image count, provider count, and how many models are
+served. No auth required.
+
+`*_window` counters cover a rolling window (`NETWORK_STATS_WINDOW_HOURS`,
+default 24h); the `*_total` counters are all-time. Mock jobs are excluded, so
+the numbers reflect work that real nodes actually served.
+
+```bash
+curl https://api.orvix.network/v1/network/stats
+```
+
+```json
+{
+  "window_hours": 24,
+  "nodes": {
+    "registered": 3, "online": 2, "ready": 1, "busy": 1,
+    "draining": 0, "offline": 1,
+    "chat_capable": 3, "image_capable": 1, "total_vram_gb": "128.0"
+  },
+  "gpus": [
+    { "gpu_model": "RTX 4090", "count": 2 },
+    { "gpu_model": "A100", "count": 1 }
+  ],
+  "providers": { "total": 1, "staked": 1 },
+  "chat": {
+    "requests_total": 3, "requests_window": 2,
+    "tokens_total": 465, "tokens_window": 450,
+    "avg_latency_ms": 1000
+  },
+  "images": { "generated_total": 2, "generated_window": 1 },
+  "models": { "chat": 3, "image": 2 },
+  "generated_at": "2026-07-26T10:00:00Z"
+}
+```
+
+`nodes.online` is the number of nodes holding a live websocket connection right
+now and is read fresh on every call. Everything else is a database aggregate
+cached for `NETWORK_STATS_CACHE_SECONDS` (default 30), so `generated_at` is the
+snapshot time rather than the request time. `avg_latency_ms` is `null` when
+there were no requests in the window.
+
+For the token/treasury side of the dashboard, see
+[`GET /v1/staking/network-stats`](#get-v1stakingnetwork-stats).
+
+---
+
 ## Admin
 
 Admin endpoints require the `X-Admin-Key` header (separate from JWT; set via
