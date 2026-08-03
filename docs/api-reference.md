@@ -255,6 +255,18 @@ For the token/treasury side of the dashboard, see
 Admin endpoints require the `X-Admin-Key` header (separate from JWT; set via
 `ADMIN_API_KEY`). Disabled when `ADMIN_API_KEY` is unset.
 
+### `GET /v1/admin/feature-flags`
+Current runtime flag state, plus the withdrawal economics. Since these are `.env`-only
+and read at request time, this is the way to confirm from outside the box that a config
+edit took effect — remember the service must be restarted to pick one up.
+
+Returns stub/worker flags (`buyback_stub`, `burn_stub`, `payout_stub`,
+`enable_payment_listener`, `enable_payout_worker`), staking gate
+(`require_stake_for_provider`, `provider_min_stake_orvx`), configuration presence
+(`orvx_mint_configured`, `admin_api_key_set`), and withdrawal economics
+(`min_withdraw_amount_usdc`, `auto_approve_max_usdc`, `max_withdrawals_per_day`).
+See [payout operations](operations/payouts.md) for how to choose the floor.
+
 ### `POST /v1/admin/buyback/execute`
 Execute a USDC→ORVX buyback via Jupiter.
 Body: `{ "amount_usdc": <number>, "slippage_bps": <int, default 50> }`.

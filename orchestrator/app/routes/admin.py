@@ -31,7 +31,13 @@ def _executor() -> str:
 
 @router.get("/feature-flags")
 async def feature_flags():
-    """Current runtime feature-flag state (admin-only)."""
+    """Current runtime feature-flag state (admin-only).
+
+    Also reports the withdrawal economics. Those are plain settings rather than
+    flags, but they are `.env`-only and read at request time, so without this
+    there is no way to confirm from outside the box that an edit took effect —
+    the alternative is SSHing in and importing `settings` by hand.
+    """
     return {
         "require_stake_for_provider": settings.REQUIRE_STAKE_FOR_PROVIDER,
         "provider_min_stake_orvx": settings.PROVIDER_MIN_STAKE_ORVX,
@@ -42,6 +48,9 @@ async def feature_flags():
         "enable_payout_worker": settings.ENABLE_PAYOUT_WORKER,
         "orvx_mint_configured": bool(settings.ORVX_MINT_ADDRESS),
         "admin_api_key_set": bool(settings.ADMIN_API_KEY),
+        "min_withdraw_amount_usdc": settings.MIN_WITHDRAW_AMOUNT_USDC,
+        "auto_approve_max_usdc": settings.AUTO_APPROVE_MAX_USDC,
+        "max_withdrawals_per_day": settings.MAX_WITHDRAWALS_PER_DAY,
     }
 
 
