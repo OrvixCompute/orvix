@@ -46,7 +46,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov ruff
+          pip install pytest pytest-cov "ruff==0.15.20"
       - name: Lint with ruff
         run: ruff check .
       - name: Run tests
@@ -78,7 +78,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install pytest-cov ruff
+          pip install pytest-cov "ruff==0.15.20"
       - name: Lint with ruff
         run: ruff check .
       - name: Run tests
