@@ -36,8 +36,22 @@ jobs:
       # has no native severity-level gating, so this fails on ANY vulnerability —
       # stricter than HIGH/CRITICAL-only. To relax later, parse the JSON output
       # below and gate on a severity allowlist instead.
+      #
+      # Documented exceptions (re-check whenever this list is touched):
+      #
+      #   PYSEC-2026-1325 — ecdsa 0.19.2, Minerva timing attack on P-256.
+      #     Reached only transitively, via python-jose[cryptography]. Not
+      #     exploitable here: the sole JWT path signs and verifies with HS256
+      #     (symmetric HMAC, app/config.py JWT_ALGORITHM), and Solana signing
+      #     goes through solders (ed25519, Rust) — nothing in the tree calls
+      #     ecdsa's P-256 sign/keygen/ECDH. Upstream considers side-channel
+      #     attacks out of scope and has no planned fix, so there is no version
+      #     to upgrade to. REMOVE THIS IGNORE if JWT_ALGORITHM ever moves to an
+      #     ES* curve, or if python-jose is swapped for a library that uses
+      #     ecdsa directly. Tracked follow-up: migrate off python-jose (largely
+      #     unmaintained) to PyJWT, which drops the ecdsa dependency entirely.
       - name: Audit ${{ matrix.name }} (human-readable, gating)
-        run: pip-audit --requirement ${{ matrix.req }} --desc --strict
+        run: pip-audit --requirement ${{ matrix.req }} --desc --strict --ignore-vuln PYSEC-2026-1325
 
       # Always produce a JSON report as a build artifact (even when the gate fails).
       - name: Audit ${{ matrix.name }} (JSON report)
