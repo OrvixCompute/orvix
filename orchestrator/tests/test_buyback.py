@@ -151,6 +151,22 @@ def test_admin_feature_flags(monkeypatch):
     assert "admin_api_key_set" in body
 
 
+def test_admin_feature_flags_reports_withdrawal_economics(monkeypatch):
+    """The endpoint is the only outside-the-box way to confirm an .env edit landed."""
+    monkeypatch.setattr(admin_mod.settings, "ADMIN_API_KEY", "secret-admin-key")
+    monkeypatch.setattr(admin_mod.settings, "MIN_WITHDRAW_AMOUNT_USDC", 0.0)
+    monkeypatch.setattr(admin_mod.settings, "AUTO_APPROVE_MAX_USDC", 250.0)
+    monkeypatch.setattr(admin_mod.settings, "MAX_WITHDRAWALS_PER_DAY", 3)
+    client = TestClient(app)
+    resp = client.get("/v1/admin/feature-flags", headers={"X-Admin-Key": "secret-admin-key"})
+    assert resp.status_code == 200
+    body = resp.json()
+    # 0 must survive as 0, not be swallowed by a falsy-check somewhere.
+    assert body["min_withdraw_amount_usdc"] == 0.0
+    assert body["auto_approve_max_usdc"] == 250.0
+    assert body["max_withdrawals_per_day"] == 3
+
+
 def test_admin_feature_flags_requires_key(monkeypatch):
     monkeypatch.setattr(admin_mod.settings, "ADMIN_API_KEY", "secret-admin-key")
     client = TestClient(app)
