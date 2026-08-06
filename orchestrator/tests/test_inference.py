@@ -571,3 +571,26 @@ def test_streaming_with_tools_is_refused(client_and_db):
 
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "streaming_tools_unsupported"
+
+
+def test_dispatched_messages_carry_no_null_tool_fields(client_and_db, monkeypatch):
+    """Optional tool fields must not be serialised as explicit nulls.
+
+    vLLM rejects a user message carrying tool_call_id=null with a wall of
+    validation errors, so dumping every optional field would break *every*
+    ordinary chat request, not just tool-calling ones.
+    """
+    client, db = client_and_db
+    _make_user(db)
+    seen = _tool_node(monkeypatch, db, {"role": "assistant", "content": "hi"}, "stop")
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 200, resp.text
+    sent = seen["job"].messages[0]
+    assert sent == {"role": "user", "content": "hi"}
+    assert all(v is not None for v in sent.values())

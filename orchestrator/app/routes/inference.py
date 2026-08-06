@@ -222,7 +222,11 @@ async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tie
     job = JobMessage(
         job_id=str(uuid.uuid4()),
         model=body.model,
-        messages=[m.model_dump() for m in body.messages],
+        # exclude_none: the tool-calling fields are optional, and dumping them
+        # as explicit nulls makes engines reject the message outright — vLLM
+        # answers a user message carrying tool_call_id=null with a wall of
+        # validation errors, which would break every ordinary chat request.
+        messages=[m.model_dump(exclude_none=True) for m in body.messages],
         max_tokens=body.max_tokens,
         temperature=body.temperature,
         stream=body.stream,
