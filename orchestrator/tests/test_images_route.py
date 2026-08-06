@@ -144,3 +144,53 @@ def test_invalid_size_400(client_and_db):
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "invalid_size"
+
+
+def test_size_above_model_max_400(client_and_db):
+    # orvix-image-1 tops out at 1024x1024; dispatching larger would only fail on
+    # the node (OOM) after the request had already consumed a job slot.
+    client, _ = client_and_db
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "orvix-image-1", "prompt": "x", "size": "1536x1536"},
+    )
+    assert resp.status_code == 400
+    error = resp.json()["error"]
+    assert error["code"] == "invalid_size"
+    assert "orvix-image-1" in error["message"]
+    # The advertised choices are the ones this model can actually serve.
+    assert "1536x1536" not in error["message"].split("Choose one of:")[1]
+
+
+def test_size_allowed_when_model_declares_a_larger_max(client_and_db):
+    client, _ = client_and_db
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "flux-schnell", "prompt": "x", "size": "1536x1536"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_size_no_model_supports_is_never_offered(client_and_db):
+    # 1024x1792 is in the endpoint's vocabulary but exceeds every catalog model's
+    # max_size — and the node protocol caps each dimension at 1536 regardless.
+    client, _ = client_and_db
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "flux-schnell", "prompt": "x", "size": "1024x1792"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_size"
+
+
+def test_size_is_case_and_whitespace_insensitive(client_and_db):
+    client, _ = client_and_db
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"prompt": "x", "size": " 512X512 "},
+    )
+    assert resp.status_code == 200, resp.text
