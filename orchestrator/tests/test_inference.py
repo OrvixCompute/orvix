@@ -42,6 +42,17 @@ def test_estimate_prompt_tokens_positive():
 
 
 # --- Endpoint tests --------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """The limiter is module-global and every test here reuses one api_key_id,
+    so without this the suite eventually trips its own 60/min limit."""
+    from app.routes.inference import _hits
+
+    _hits.clear()
+    yield
+    _hits.clear()
+
+
 @pytest.fixture
 def client_and_db(monkeypatch):
     db = FakeSupabase()
@@ -159,7 +170,8 @@ def test_record_job_real_accrues_budget_but_mock_does_not():
     # Real job -> accounting accrues.
     db = FakeSupabase()
     inference_route._record_job(
-        db, user_id="u1", api_key_id="k1", node_id="node-1", model="qwen-2.5-7b",
+        db, user_id="u1", api_key_id="k1", node_id="node-1", provider_id="prov-1",
+        model="qwen-2.5-7b",
         prompt_tokens=1000, completion_tokens=1000, cost=Decimal("1.0"),
         latency_ms=5, is_mock=False,
     )
@@ -172,7 +184,8 @@ def test_record_job_real_accrues_budget_but_mock_does_not():
     # Mock job -> no accounting row created at all.
     db2 = FakeSupabase()
     inference_route._record_job(
-        db2, user_id="u1", api_key_id="k1", node_id=None, model="qwen-2.5-7b",
+        db2, user_id="u1", api_key_id="k1", node_id=None, provider_id=None,
+        model="qwen-2.5-7b",
         prompt_tokens=1000, completion_tokens=1000, cost=Decimal("1.0"),
         latency_ms=5, is_mock=True,
     )
@@ -245,3 +258,80 @@ def test_rate_limit_triggers(client_and_db):
     for _ in range(62):
         statuses.append(client.post("/v1/chat/completions", headers=headers, json=payload).status_code)
     assert 429 in statuses
+
+
+# --- Provider attribution --------------------------------------------------
+def test_node_served_job_records_the_provider(client_and_db, monkeypatch):
+    """The job stores provider_id itself rather than relying on the node row.
+
+    Node rows are deleted routinely and (since migration 015) that nulls
+    jobs.node_id, so inferring the provider through the node would silently
+    lose the attribution for earnings already recorded against them.
+    """
+    from app.services import node_manager as nm_mod
+    from app.services.node_manager import NodeConnection
+
+    client, db = client_and_db
+    _make_user(db)
+    provider = db.add_user()
+
+    node = NodeConnection(
+        node_id="node-1",
+        provider_id=provider["id"],
+        websocket=None,
+        model="qwen-2.5-7b",
+        gpu_info={},
+        max_concurrent_jobs=4,
+        models_supported=["qwen-2.5-7b"],
+    )
+    monkeypatch.setattr(nm_mod.node_manager, "select_node", lambda model, tier: node)
+
+    async def fake_dispatch(node_, job):
+        from app.models.protocol import JobResultMessage
+
+        return JobResultMessage(
+            job_id=job.job_id,
+            status="completed",
+            result={
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": "hi"},
+                     "finish_reason": "stop"}
+                ]
+            },
+            prompt_tokens=5,
+            completion_tokens=3,
+        )
+
+    monkeypatch.setattr(nm_mod.node_manager, "dispatch_job", fake_dispatch)
+
+    async def fake_settle(node_, cost):
+        return Decimal("0")
+
+    monkeypatch.setattr(nm_mod.node_manager, "settle_job", fake_settle)
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    row = db._table("jobs").rows[0]
+    assert row["provider_id"] == provider["id"]
+    assert row["node_id"] == "node-1"
+    assert row["is_mock"] is False
+
+
+def test_mock_job_has_no_provider(client_and_db):
+    # Nobody served it, so there is nobody to attribute it to.
+    client, db = client_and_db
+    _make_user(db)
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    row = db._table("jobs").rows[0]
+    assert row["is_mock"] is True
+    assert row["provider_id"] is None
