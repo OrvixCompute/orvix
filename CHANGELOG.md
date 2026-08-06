@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Tool / function calling** on `POST /v1/chat/completions` (non-streaming). `tools` and `tool_choice` are accepted in OpenAI's shape and forwarded untouched to the serving engine; a tool-calling turn comes back with `finish_reason: "tool_calls"`, `message.tool_calls`, and `message.content: null`, and `role: "tool"` result messages with a `tool_call_id` round-trip. `tools` with `stream: true` is refused with `400 streaming_tools_unsupported` rather than streaming prose and dropping the calls — streaming tool deltas need argument-fragment reassembly that is not implemented yet. Providers must start vLLM with `--enable-auto-tool-choice --tool-call-parser <parser>` (`hermes` for Qwen2.5) or the model ignores the tools and answers in prose
 - Node multi-engine architecture: `AbstractEngine` base with `ChatEngine`/`ImageEngine` families and a `model_id → engine_type` router (foundation for image generation)
 - `FluxEngine` — Flux Schnell text-to-image via Diffusers (bfloat16, 1024×1024 / 4 steps defaults); heavy GPU deps imported lazily
 - `OrvixImageEngine` — 4-step distilled text-to-image via Diffusers (fp16, guidance-free); no gated upstream access and a smaller on-disk footprint than Flux Schnell, so it is the node's default registered image engine (`FluxEngine` stays in the codebase, unregistered, for a future gated-access re-enable)

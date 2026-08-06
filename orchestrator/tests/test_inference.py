@@ -1,5 +1,6 @@
 """Unit tests for the inference endpoint and its billing/cost logic."""
 
+import json
 from decimal import Decimal
 
 import pytest
@@ -393,3 +394,180 @@ def test_refusal_does_not_consume_the_free_quota(client_and_db, monkeypatch):
 
     assert resp.status_code == 503
     assert calls == [], "quota was consumed for a request that was refused"
+
+
+# --- tool calling ----------------------------------------------------------
+_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Current weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        },
+    }
+]
+
+
+def _tool_node(monkeypatch, db, result_message, finish_reason="tool_calls"):
+    """Wire a fake node that echoes back whatever message we hand it."""
+    from app.services import node_manager as nm_mod
+    from app.services.node_manager import NodeConnection
+
+    provider = db.add_user()
+    node = NodeConnection(
+        node_id="node-tools",
+        provider_id=provider["id"],
+        websocket=None,
+        model="qwen-2.5-7b",
+        gpu_info={},
+        max_concurrent_jobs=4,
+        models_supported=["qwen-2.5-7b"],
+    )
+    monkeypatch.setattr(nm_mod.node_manager, "select_node", lambda model, tier: node)
+
+    seen = {}
+
+    async def fake_dispatch(node_, job):
+        from app.models.protocol import JobResultMessage
+
+        seen["job"] = job
+        return JobResultMessage(
+            job_id=job.job_id,
+            status="completed",
+            result={
+                "id": "chatcmpl-x",
+                "object": "chat.completion",
+                "model": job.model,
+                "choices": [
+                    {"index": 0, "message": result_message, "finish_reason": finish_reason}
+                ],
+                "usage": {"prompt_tokens": 42, "completion_tokens": 17, "total_tokens": 59},
+            },
+            prompt_tokens=42,
+            completion_tokens=17,
+        )
+
+    async def fake_settle(node_, cost):
+        return Decimal("0")
+
+    monkeypatch.setattr(nm_mod.node_manager, "dispatch_job", fake_dispatch)
+    monkeypatch.setattr(nm_mod.node_manager, "settle_job", fake_settle)
+    return seen
+
+
+def test_tools_reach_the_node(client_and_db, monkeypatch):
+    client, db = client_and_db
+    _make_user(db)
+    seen = _tool_node(monkeypatch, db, {"role": "assistant", "content": "hi"}, "stop")
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={
+            "model": "qwen-2.5-7b",
+            "messages": [{"role": "user", "content": "weather in Jakarta?"}],
+            "tools": _TOOLS,
+            "tool_choice": "auto",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    job = seen["job"]
+    assert job.tools == _TOOLS
+    assert job.tool_choice == "auto"
+
+
+def test_tool_calls_are_returned_to_the_caller(client_and_db, monkeypatch):
+    client, db = client_and_db
+    _make_user(db)
+    message = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_abc123",
+                "type": "function",
+                "function": {"name": "get_weather", "arguments": '{"city": "Jakarta"}'},
+            }
+        ],
+    }
+    _tool_node(monkeypatch, db, message)
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={
+            "model": "qwen-2.5-7b",
+            "messages": [{"role": "user", "content": "weather in Jakarta?"}],
+            "tools": _TOOLS,
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    choice = resp.json()["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"]["content"] is None
+    call = choice["message"]["tool_calls"][0]
+    assert call["function"]["name"] == "get_weather"
+    assert json.loads(call["function"]["arguments"]) == {"city": "Jakarta"}
+
+
+def test_a_tool_result_message_round_trips(client_and_db, monkeypatch):
+    """role="tool" with tool_call_id must be accepted and forwarded."""
+    client, db = client_and_db
+    _make_user(db)
+    seen = _tool_node(monkeypatch, db, {"role": "assistant", "content": "It is 30C."}, "stop")
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={
+            "model": "qwen-2.5-7b",
+            "messages": [
+                {"role": "user", "content": "weather in Jakarta?"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_abc123",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"city":"Jakarta"}'},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_abc123", "content": "30C, humid"},
+            ],
+            "tools": _TOOLS,
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    roles = [m["role"] for m in seen["job"].messages]
+    assert roles == ["user", "assistant", "tool"]
+    assert seen["job"].messages[2]["tool_call_id"] == "call_abc123"
+
+
+def test_streaming_with_tools_is_refused(client_and_db):
+    """Better an explicit 400 than streaming prose and dropping the calls."""
+    client, db = client_and_db
+    _make_user(db)
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={
+            "model": "qwen-2.5-7b",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": _TOOLS,
+            "stream": True,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "streaming_tools_unsupported"

@@ -197,17 +197,25 @@ class VLLMBackend(ChatEngine):
 
     # --- inference ---------------------------------------------------------
     def _payload(self, request: GenerateRequest, stream: bool) -> dict:
-        return {
+        payload = {
             "model": self.vllm_model,
             "messages": request.messages,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
             "stream": stream,
         }
+        # Only send the tool keys when the caller asked for tools. vLLM rejects a
+        # null/empty `tools` outright, so an unconditional key would break every
+        # ordinary chat request.
+        if request.tools:
+            payload["tools"] = request.tools
+            if request.tool_choice is not None:
+                payload["tool_choice"] = request.tool_choice
+        return payload
 
     @staticmethod
     def _finish(reason: Optional[str]) -> str:
-        return reason if reason in ("stop", "length") else "stop"
+        return reason if reason in ("stop", "length", "tool_calls") else "stop"
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse:
         assert self._client is not None, "backend not loaded"
@@ -218,11 +226,18 @@ class VLLMBackend(ChatEngine):
         data = r.json()
         choice = data["choices"][0]
         usage = data.get("usage") or {}
+        message = choice.get("message") or {}
+        tool_calls = message.get("tool_calls") or None
         return GenerateResponse(
-            content=(choice["message"].get("content") or ""),
+            content=(message.get("content") or ""),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
-            finish_reason=self._finish(choice.get("finish_reason")),
+            # Some engines report "stop" even when they emitted tool calls;
+            # trust the presence of the calls over the label.
+            finish_reason=(
+                "tool_calls" if tool_calls else self._finish(choice.get("finish_reason"))
+            ),
+            tool_calls=tool_calls,
         )
 
     async def generate_stream(

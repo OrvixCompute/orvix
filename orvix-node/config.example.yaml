@@ -22,6 +22,11 @@ health_port: 9000
 max_concurrent_jobs: 4       # chat jobs in flight at once
 max_concurrent_image_jobs: 1 # image jobs are capped separately (VRAM per pass)
 backend: "mock"            # "mock" or "vllm"
+# Tool calling: vLLM only parses tool calls when the server is started with
+#   --enable-auto-tool-choice --tool-call-parser <parser>
+# Pick the parser for your model family (hermes for Qwen2.5, llama3_json for
+# Llama 3, mistral for Mistral, ...). Without these flags the model answers in
+# prose and the tools are ignored. Set them via ORVIX_NODE_VLLM_SERVE_CMD.
 
 # --- Logging ---
 log_level: "INFO"

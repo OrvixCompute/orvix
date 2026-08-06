@@ -47,7 +47,13 @@ def estimate_prompt_tokens(messages: List[ChatMessage]) -> int:
     """Approximate prompt tokens by encoding every message's content."""
     total = 0
     for m in messages:
-        total += len(_encoder.encode(m.content))
+        # content is null on an assistant turn that only calls tools, and on
+        # those turns the tokens live in the call arguments instead.
+        total += len(_encoder.encode(m.content or ""))
+        if m.tool_calls:
+            for call in m.tool_calls:
+                total += len(_encoder.encode(call.function.name))
+                total += len(_encoder.encode(call.function.arguments))
     # Small per-message overhead, mirroring OpenAI's accounting.
     total += 4 * len(messages)
     return total
