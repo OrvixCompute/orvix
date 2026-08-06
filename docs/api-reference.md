@@ -104,8 +104,11 @@ curl https://api.orvix.network/v1/chat/completions \
   }'
 ```
 
-> Note: inference currently returns a mock response. Real GPU-backed inference
-> (vLLM) is the next milestone — see [CHANGELOG.md](../CHANGELOG.md).
+> Responses come from a real GPU node running the model. If no node can take the
+> job the request returns `503 no_chat_provider` rather than a placeholder — the
+> API never returns a fabricated answer. (A local `ALLOW_MOCK_INFERENCE` flag
+> serves a canned reply for development against an empty network; it is off by
+> default and must stay off anywhere real users can reach.)
 
 ---
 

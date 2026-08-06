@@ -3,8 +3,11 @@
 Routing:
   - If a ready node supports the model, the job is dispatched to it (real tokens,
     real billing, provider earns a share, jobs.is_mock = False).
-  - If no node is available, we fall back to the in-process mock so development
-    can continue (jobs.is_mock = True).
+  - If no node is available the request is refused with 503 no_chat_provider.
+    Setting ALLOW_MOCK_INFERENCE serves an in-process mock instead so local
+    development can continue against an empty network (jobs.is_mock = True);
+    it is off by default because a mock reply is indistinguishable from a
+    real one apart from the X-Orvix-Node header.
 """
 
 import asyncio
@@ -143,6 +146,23 @@ async def chat_completions(
     billing = BillingService(db)
     current_balance = Decimal(billing.get_balance(user["id"])["balance_usdc"])
 
+    # Pick the node BEFORE the quota gate. Selection is a read of the in-memory
+    # registry with no side effects, while the quota gate consumes a free-tier
+    # request — so checking availability first means a user is never charged a
+    # request the network could not have served anyway.
+    node = node_manager.select_node(body.model, tier)
+    if node is None and not settings.ALLOW_MOCK_INFERENCE:
+        # Fail loudly rather than hand back a canned answer: a mock reply is
+        # indistinguishable from a real one apart from a response header, so
+        # serving it to real users misrepresents the network as working. This
+        # mirrors what /v1/images/generations already does.
+        logger.warning("No nodes available for {} — refusing the request", body.model)
+        raise OrvixException(
+            "No compute providers are currently available",
+            error_code="no_chat_provider",
+            status_code=503,
+        )
+
     # Quota gate: holders are unlimited; non-holders get CHAT_LIFETIME_FREE_LIMIT
     # free requests (not billed), then must pay (balance) or are blocked (402).
     is_holder, _ = await holder_service.get_holder_status(db, user["wallet_address"])
@@ -163,7 +183,6 @@ async def chat_completions(
                 },
             )
 
-    node = node_manager.select_node(body.model, tier)
     if node is None:
         logger.warning("No nodes available for {} — falling back to mock", body.model)
         resp = await _serve_mock(

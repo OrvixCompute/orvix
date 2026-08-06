@@ -335,3 +335,61 @@ def test_mock_job_has_no_provider(client_and_db):
     row = db._table("jobs").rows[0]
     assert row["is_mock"] is True
     assert row["provider_id"] is None
+
+
+# --- refusing to fake it ---------------------------------------------------
+def test_no_node_returns_503_when_mock_is_disabled(client_and_db, monkeypatch):
+    """With no node and the mock off, chat must fail like images already do.
+
+    A mock reply is indistinguishable from a real one apart from the
+    X-Orvix-Node header, so serving it to real users misrepresents an empty
+    network as a working one.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
+    client, db = client_and_db
+    _make_user(db)
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "no_chat_provider"
+    # Nothing was served, so nothing was recorded.
+    assert db._table("jobs").rows == []
+
+
+def test_refusal_does_not_consume_the_free_quota(client_and_db, monkeypatch):
+    """Availability is checked before the quota gate.
+
+    The gate consumes one of the user's lifetime-free requests as a side
+    effect, so checking it first would bill them for a request the network
+    could never have served.
+    """
+    from app.config import settings
+    from app.services import quota_service
+
+    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
+    client, db = client_and_db
+    _make_user(db)
+
+    calls = []
+    real = quota_service.enforce_chat_quota
+    monkeypatch.setattr(
+        quota_service,
+        "enforce_chat_quota",
+        lambda *a, **k: (calls.append(1), real(*a, **k))[1],
+    )
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 503
+    assert calls == [], "quota was consumed for a request that was refused"
