@@ -4,8 +4,11 @@ result delivery.
 
 The executor no longer owns a single backend; for each job it asks the
 ModelManager for the engine that serves the job's model (loading/swapping it into
-VRAM if needed), then runs generation on it. Only chat jobs flow here today —
-image dispatch arrives with the Session 3 protocol changes.
+VRAM if needed), then runs generation on it.
+
+Chat and image jobs are limited separately: they cost very different amounts of
+VRAM per job, so one shared budget would either starve chat or let image jobs
+pile up until the card runs out.
 """
 
 from __future__ import annotations
@@ -40,9 +43,16 @@ class JobExecutor:
         max_concurrent: int = 4,
         image_tmp_dir: str = "/tmp/node-images",
         binary_base_url: str = "",
+        max_concurrent_image: int = 1,
     ) -> None:
         self.manager = manager
         self._sem = asyncio.Semaphore(max_concurrent)
+        # Image jobs get their own, much tighter limit. A diffusion pass
+        # allocates several GB of transient VRAM on top of the resident weights,
+        # so a card that comfortably serves one generation next to a chat engine
+        # still OOMs on two at once — and sharing the chat semaphore would let
+        # that happen. Chat and image run concurrently; image runs alone.
+        self._image_sem = asyncio.Semaphore(max_concurrent_image)
         self.image_tmp_dir = image_tmp_dir
         # Base URL the orchestrator uses to fetch generated images from this node.
         self.binary_base_url = binary_base_url.rstrip("/")
@@ -174,7 +184,7 @@ class JobExecutor:
         send_failed: SendFn,
     ) -> None:
         """Run one image job. Never raises — failures are reported via send_failed."""
-        await self._sem.acquire()
+        await self._image_sem.acquire()
         await state.add_job(dispatch.job_id, {"model": dispatch.model, "kind": "image"})
         try:
             req = ImageRequest(
@@ -214,7 +224,7 @@ class JobExecutor:
             )
         finally:
             await state.remove_job(dispatch.job_id)
-            self._sem.release()
+            self._image_sem.release()
 
     async def shutdown(self, timeout: float = 30.0) -> None:
         """Wait for active jobs to drain, then unload whatever engine is resident."""

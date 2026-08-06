@@ -13,7 +13,8 @@ model: "qwen-2.5-7b"
 # --- Runtime ---
 heartbeat_interval: 15
 health_port: 9000
-max_concurrent_jobs: 4
+max_concurrent_jobs: 4       # chat jobs in flight at once
+max_concurrent_image_jobs: 1 # image jobs are capped separately (VRAM per pass)
 backend: "mock"            # "mock" or "vllm"
 
 # --- Logging ---

@@ -115,6 +115,7 @@ async def _run_agent(cfg) -> None:
         max_concurrent=cfg.max_concurrent_jobs,
         image_tmp_dir=cfg.image_tmp_dir,
         binary_base_url=binary_base_url,
+        max_concurrent_image=cfg.max_concurrent_image_jobs,
     )
 
     # Pre-warm the chat engine so the first request isn't slowed by a cold load.
