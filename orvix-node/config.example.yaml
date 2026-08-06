@@ -6,6 +6,12 @@
 provider_id: "your-provider-id"     # from POST /v1/provider/register
 node_secret: "your-node-secret"     # keep private
 
+# --- Identity (optional) ---
+# Leave unset and the node generates one on first run, caching it in a `node-id`
+# file next to this config so reconnects reuse the same row in the orchestrator's
+# node list. Set it explicitly only to pin a machine to a known id.
+# node_id: ""
+
 # --- Connection ---
 orchestrator_url: "wss://api.orvix.xyz"   # local dev: ws://localhost:8000
 model: "qwen-2.5-7b"

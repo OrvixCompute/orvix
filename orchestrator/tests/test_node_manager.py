@@ -112,6 +112,77 @@ async def test_register_no_secret_set_raises(monkeypatch):
         await mgr.register_node(FakeWS(), msg)
 
 
+def _reg(provider_id, node_id=None, **kw):
+    return RegisterMessage(
+        provider_id=provider_id,
+        node_secret="secret",
+        version="0.1.0",
+        gpu_info=GPUInfo(model="RTX 4090", vram_total_mb=24576),
+        models_supported=["qwen-2.5-7b"],
+        max_concurrent_jobs=2,
+        node_id=node_id,
+        **kw,
+    )
+
+
+async def test_register_reuses_the_node_id_across_reconnects(monkeypatch):
+    # Every reconnect used to mint a fresh uuid, leaving an `offline` ghost row
+    # behind and inflating the public node/VRAM counts for a single machine.
+    db = FakeSupabase()
+    user = db.add_user()
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+    stable = "11111111-2222-3333-4444-555555555555"
+
+    first = await mgr.register_node(FakeWS(), _reg(user["id"], stable))
+    mgr.connected_nodes.clear()  # simulate the disconnect
+    second = await mgr.register_node(FakeWS(), _reg(user["id"], stable))
+
+    assert first.node_id == second.node_id == stable
+    assert len(db._table("nodes").rows) == 1
+
+
+async def test_register_without_node_id_still_works(monkeypatch):
+    # Older nodes omit the field; they keep the previous per-connection uuid.
+    db = FakeSupabase()
+    user = db.add_user()
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+
+    first = await mgr.register_node(FakeWS(), _reg(user["id"]))
+    second = await mgr.register_node(FakeWS(), _reg(user["id"]))
+
+    assert first.node_id != second.node_id
+    assert len(db._table("nodes").rows) == 2
+
+
+async def test_register_rejects_a_node_id_owned_by_another_provider(monkeypatch):
+    # Otherwise a provider could claim someone else's row and its job history.
+    db = FakeSupabase()
+    owner, attacker = db.add_user(), db.add_user()
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+    stable = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    await mgr.register_node(FakeWS(), _reg(owner["id"], stable))
+    with pytest.raises(ValueError, match="another provider"):
+        await mgr.register_node(FakeWS(), _reg(attacker["id"], stable))
+
+    assert len(db._table("nodes").rows) == 1
+    assert db._table("nodes").rows[0]["provider_id"] == owner["id"]
+
+
+async def test_register_rejects_a_malformed_node_id(monkeypatch):
+    db = FakeSupabase()
+    user = db.add_user()
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+
+    with pytest.raises(ValueError, match="UUID"):
+        await mgr.register_node(FakeWS(), _reg(user["id"], "not-a-uuid"))
+    assert not db._table("nodes").rows
+
+
 def test_select_single_and_no_match():
     mgr = NodeManager()
     c = _conn("n1")

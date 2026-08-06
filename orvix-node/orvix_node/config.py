@@ -8,6 +8,7 @@ Config file lives at ~/.orvix/config.yaml (Linux/Mac) or
 
 import os
 import sys
+import uuid
 from pathlib import Path
 
 import yaml
@@ -39,6 +40,11 @@ class NodeConfig(BaseModel):
     # Required for the orchestrator to identify and authenticate this node.
     provider_id: str
     node_secret: str
+    # This machine's stable identity, sent at registration so reconnects reuse
+    # one `nodes` row instead of leaving an offline ghost behind each restart.
+    # Left empty it is generated once and cached beside the config file; set it
+    # explicitly to pin a node to a known id (e.g. when moving hosts).
+    node_id: str = ""
 
     orchestrator_url: str = "wss://api.orvix.network"
     model: str = "qwen-2.5-7b"
@@ -99,6 +105,42 @@ def _env_overrides() -> dict:
     return overrides
 
 
+NODE_ID_FILENAME = "node-id"
+
+
+def resolve_node_id(config_file: Path | None = None) -> str:
+    """Return this machine's stable node id, generating it on first run.
+
+    The id is stored next to the config file rather than in a fixed home
+    directory, because the config is the thing an operator puts on durable
+    storage. On a container host, ``~`` is usually the ephemeral layer — keeping
+    identity beside the config means it survives exactly as long as the config
+    does, and a restart reuses the same ``nodes`` row instead of orphaning one.
+
+    A caller that wants full control can set ``node_id`` in the config; this is
+    only the fallback.
+    """
+    directory = Path(config_file).parent if config_file else _orvix_dir()
+    id_path = directory / NODE_ID_FILENAME
+
+    try:
+        existing = id_path.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+    except OSError:
+        pass  # missing or unreadable — fall through and mint a new one
+
+    node_id = str(uuid.uuid4())
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        id_path.write_text(node_id + "\n", encoding="utf-8")
+    except OSError:
+        # Non-fatal: the node still registers, it just gets a fresh id next
+        # start (the pre-existing behaviour) instead of a stable one.
+        pass
+    return node_id
+
+
 def load_config(
     cli_overrides: dict | None = None, config_file: Path | None = None
 ) -> NodeConfig:
@@ -122,6 +164,9 @@ def load_config(
 
     if cli_overrides:
         data.update({k: v for k, v in cli_overrides.items() if v is not None})
+
+    if not data.get("node_id"):
+        data["node_id"] = resolve_node_id(path)
 
     try:
         return NodeConfig(**data)

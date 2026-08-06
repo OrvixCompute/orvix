@@ -82,6 +82,37 @@ class NodeManager:
         self._health_task: asyncio.Task | None = None
 
     # --- registration ------------------------------------------------------
+    @staticmethod
+    def _resolve_node_id(db, msg: RegisterMessage) -> str:
+        """Pick the `nodes` row id for this registration.
+
+        A node that supplies its own id keeps one row across reconnects. Without
+        it every reconnect minted a fresh uuid, so a single machine accumulated
+        `offline` ghost rows and inflated the public node/VRAM counts.
+
+        The claimed id is only honoured when it is unused or already belongs to
+        this provider — otherwise a provider could take over another provider's
+        row along with its job history.
+        """
+        if not msg.node_id:
+            return str(uuid.uuid4())
+
+        try:
+            claimed = str(uuid.UUID(str(msg.node_id)))
+        except ValueError:
+            raise ValueError("node_id must be a UUID") from None
+
+        owner = (
+            db.table("nodes")
+            .select("id, provider_id")
+            .eq("id", claimed)
+            .limit(1)
+            .execute()
+        )
+        if owner.data and owner.data[0].get("provider_id") != msg.provider_id:
+            raise ValueError("node_id is registered to another provider")
+        return claimed
+
     async def register_node(self, websocket, msg: RegisterMessage) -> NodeConnection:
         db = get_supabase()
 
@@ -108,7 +139,7 @@ class NodeManager:
         if not hmac.compare_digest(provided_hash, stored_hash):
             raise ValueError("Invalid node_secret")
 
-        node_id = str(uuid.uuid4())
+        node_id = self._resolve_node_id(db, msg)
         # `engines`/`vram_gb` are optional (older nodes omit them). Default the
         # engine list to ["chat"] so pre-capability nodes still serve chat.
         engines = list(msg.engines) if msg.engines else ["chat"]
