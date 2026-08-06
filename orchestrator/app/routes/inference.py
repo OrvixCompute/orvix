@@ -24,7 +24,12 @@ from supabase import Client
 from app.config import settings
 from app.database import get_supabase
 from app.dependencies import get_user_from_api_key
-from app.exceptions import InsufficientBalanceError, OrvixException, RateLimitError
+from app.exceptions import (
+    InsufficientBalanceError,
+    OrvixException,
+    RateLimitError,
+    ValidationError,
+)
 from app.logger import logger
 from app.models.inference import (
     ChatCompletionChoice,
@@ -142,6 +147,17 @@ async def chat_completions(
     _check_rate_limit(api_key["id"])
     inference_service.validate_model(body.model)
 
+    if body.tools and body.stream:
+        # Streaming tool calls arrive as indexed argument fragments that have to
+        # be reassembled; that is not implemented yet. Refusing is better than
+        # streaming the prose and silently dropping the calls, which would look
+        # like the model ignored the tools.
+        raise ValidationError(
+            "Streaming is not supported together with tools yet. "
+            "Retry with stream=false.",
+            error_code="streaming_tools_unsupported",
+        )
+
     prompt_tokens = inference_service.estimate_prompt_tokens(body.messages)
     billing = BillingService(db)
     current_balance = Decimal(billing.get_balance(user["id"])["balance_usdc"])
@@ -211,6 +227,8 @@ async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tie
         temperature=body.temperature,
         stream=body.stream,
         user_tier=tier,
+        tools=[t.model_dump() for t in body.tools] if body.tools else None,
+        tool_choice=body.tool_choice,
     )
 
     if body.stream:

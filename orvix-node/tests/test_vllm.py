@@ -258,3 +258,118 @@ async def test_managed_load_raises_if_server_exits(patch_async_client, monkeypat
     )
     with pytest.raises(RuntimeError, match="exited during startup"):
         await b.load(CATALOG)
+
+
+# --- tool calling ----------------------------------------------------------
+_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Current weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        },
+    }
+]
+
+_TOOL_CALL_JSON = {
+    "choices": [
+        {
+            "message": {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_abc123",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"city": "Jakarta"}',
+                        },
+                    }
+                ],
+            },
+            "finish_reason": "tool_calls",
+        }
+    ],
+    "usage": {"prompt_tokens": 42, "completion_tokens": 17},
+}
+
+
+async def test_tools_are_omitted_from_the_payload_when_absent(make_backend):
+    """vLLM rejects a null/empty `tools` key, so ordinary chat must not send it."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": VLLM_MODEL}]})
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=_completion_json())
+
+    backend = make_backend(handler)
+    await backend.generate(GenerateRequest(messages=[{"role": "user", "content": "hi"}]))
+
+    assert "tools" not in seen
+    assert "tool_choice" not in seen
+
+
+async def test_tools_are_forwarded_verbatim(make_backend):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": VLLM_MODEL}]})
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=_TOOL_CALL_JSON)
+
+    backend = make_backend(handler)
+    await backend.generate(
+        GenerateRequest(
+            messages=[{"role": "user", "content": "weather in Jakarta?"}],
+            tools=_TOOLS,
+            tool_choice="auto",
+        )
+    )
+
+    assert seen["tools"] == _TOOLS
+    assert seen["tool_choice"] == "auto"
+
+
+async def test_tool_calls_come_back_on_the_response(make_backend):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": VLLM_MODEL}]})
+        return httpx.Response(200, json=_TOOL_CALL_JSON)
+
+    backend = make_backend(handler)
+    resp = await backend.generate(
+        GenerateRequest(messages=[{"role": "user", "content": "x"}], tools=_TOOLS)
+    )
+
+    assert resp.finish_reason == "tool_calls"
+    assert resp.content == ""
+    assert resp.tool_calls is not None and len(resp.tool_calls) == 1
+    call = resp.tool_calls[0]
+    assert call["function"]["name"] == "get_weather"
+    # Arguments stay a JSON string, as OpenAI sends them.
+    assert json.loads(call["function"]["arguments"]) == {"city": "Jakarta"}
+
+
+async def test_tool_calls_win_over_a_stop_finish_reason(make_backend):
+    """Some engines label a tool-call turn "stop"; the calls are the truth."""
+    payload = json.loads(json.dumps(_TOOL_CALL_JSON))
+    payload["choices"][0]["finish_reason"] = "stop"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": VLLM_MODEL}]})
+        return httpx.Response(200, json=payload)
+
+    backend = make_backend(handler)
+    resp = await backend.generate(
+        GenerateRequest(messages=[{"role": "user", "content": "x"}], tools=_TOOLS)
+    )
+    assert resp.finish_reason == "tool_calls"

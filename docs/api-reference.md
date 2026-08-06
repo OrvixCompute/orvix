@@ -104,6 +104,32 @@ curl https://api.orvix.network/v1/chat/completions \
   }'
 ```
 
+**Tool calling** is supported on the non-streaming path. Pass OpenAI-shaped
+`tools` (and optionally `tool_choice`); when the model decides to call one, the
+reply carries `finish_reason: "tool_calls"` and `message.tool_calls`, with
+`message.content` null. Send the result back as a `role: "tool"` message
+carrying the matching `tool_call_id`.
+
+```bash
+curl -X POST https://orvix.network/v1/chat/completions \
+  -H "Authorization: Bearer orvx_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen-2.5-7b",
+    "messages": [{"role": "user", "content": "What is the weather in Jakarta?"}],
+    "tools": [{"type": "function", "function": {
+      "name": "get_weather",
+      "description": "Current weather for a city",
+      "parameters": {"type": "object", "properties": {"city": {"type": "string"}},
+                     "required": ["city"]}}}]
+  }'
+```
+
+`tools` together with `stream: true` returns `400 streaming_tools_unsupported`.
+Streaming emits tool calls as indexed argument fragments that have to be
+reassembled, which is not implemented yet — refusing is preferred over streaming
+the prose and silently dropping the calls.
+
 > Responses come from a real GPU node running the model. If no node can take the
 > job the request returns `503 no_chat_provider` rather than a placeholder — the
 > API never returns a fabricated answer. (A local `ALLOW_MOCK_INFERENCE` flag

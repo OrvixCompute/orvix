@@ -69,6 +69,8 @@ class JobExecutor:
                 messages=job.messages,
                 max_tokens=job.max_tokens,
                 temperature=job.temperature,
+                tools=job.tools,
+                tool_choice=job.tool_choice,
             )
 
             async with self.manager.serving(job.model) as engine:
@@ -103,6 +105,13 @@ class JobExecutor:
     ) -> None:
         resp = await engine.generate(req)
         latency_ms = int((time.perf_counter() - started) * 1000)
+        # OpenAI sends content: null (not "") on a turn that is purely tool calls,
+        # and clients branch on that, so reproduce it exactly.
+        message: dict = {"role": "assistant", "content": resp.content or None}
+        if resp.tool_calls:
+            message["tool_calls"] = resp.tool_calls
+        else:
+            message["content"] = resp.content
         result = {
             "id": f"chatcmpl-{job.job_id}",
             "object": "chat.completion",
@@ -110,7 +119,7 @@ class JobExecutor:
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": resp.content},
+                    "message": message,
                     "finish_reason": resp.finish_reason,
                 }
             ],

@@ -128,6 +128,11 @@ class JobMessage(BaseMessage):
     temperature: float = 0.7
     stream: bool = False
     user_tier: str = "bronze"
+    # OpenAI-shaped tool definitions and selection policy, forwarded untouched to
+    # the serving engine. Optional so nodes that predate tool calling still parse
+    # the message; they simply ignore the fields and answer in prose.
+    tools: Optional[List[dict]] = None
+    tool_choice: Optional[Union[str, dict]] = None
 
 
 class ImageJobDispatchMessage(BaseMessage):

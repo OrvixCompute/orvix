@@ -1,6 +1,6 @@
 """Pydantic models matching the OpenAI chat-completions request/response shape."""
 
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -37,9 +37,42 @@ def image_model_max_size(model_id: str) -> tuple[int, int]:
     raise KeyError(f"{model_id!r} is not an image model in the catalog")
 
 
+class ToolCallFunction(BaseModel):
+    name: str
+    # OpenAI sends the arguments as a JSON *string*, not an object, so callers
+    # can stream them and parse once complete. Kept verbatim.
+    arguments: str
+
+
+class ToolCall(BaseModel):
+    id: str
+    type: Literal["function"] = "function"
+    function: ToolCallFunction
+
+
 class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str
+    role: Literal["system", "user", "assistant", "tool"]
+    # Null on an assistant turn that only calls tools — the model produced no
+    # prose, just the call.
+    content: Optional[str] = None
+    # Set on an assistant message that requests tool calls.
+    tool_calls: Optional[List[ToolCall]] = None
+    # Set on a role="tool" message, linking the result back to the call.
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
+
+
+class FunctionDef(BaseModel):
+    name: str
+    description: Optional[str] = None
+    # JSON Schema. Passed through untouched; validating it here would only
+    # diverge from whatever the serving engine actually accepts.
+    parameters: Optional[dict] = None
+
+
+class Tool(BaseModel):
+    type: Literal["function"] = "function"
+    function: FunctionDef
 
 
 class ChatCompletionRequest(BaseModel):
@@ -48,6 +81,9 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int = Field(512, ge=1, le=4096)
     temperature: float = Field(0.7, ge=0.0, le=2.0)
     stream: bool = False
+    tools: Optional[List[Tool]] = None
+    # "auto" | "none" | "required" | {"type":"function","function":{"name":...}}
+    tool_choice: Optional[Union[str, dict]] = None
 
 
 class Usage(BaseModel):

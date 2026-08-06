@@ -27,6 +27,9 @@ class GenerateRequest(BaseModel):
     messages: List[dict]
     max_tokens: int = 512
     temperature: float = 0.7
+    # OpenAI-shaped tool definitions, passed straight through to the engine.
+    tools: Optional[List[dict]] = None
+    tool_choice: Optional[object] = None
 
 
 class GenerateUsage(BaseModel):
@@ -35,10 +38,13 @@ class GenerateUsage(BaseModel):
 
 
 class GenerateResponse(BaseModel):
-    content: str
+    # Empty when the model answered purely with tool calls.
+    content: str = ""
     prompt_tokens: int
     completion_tokens: int
-    finish_reason: str = "stop"  # "stop" | "length"
+    finish_reason: str = "stop"  # "stop" | "length" | "tool_calls"
+    # Raw OpenAI-shaped tool calls from the engine, forwarded as-is.
+    tool_calls: Optional[List[dict]] = None
 
 
 class GenerateChunk(BaseModel):
