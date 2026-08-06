@@ -31,5 +31,6 @@ async def api_info() -> dict:
             "api_keys": "/v1/api-keys",
             "chat_completions": "/v1/chat/completions",
             "billing": "/v1/billing",
+            "network_stats": "/v1/network/stats",
         },
     }

@@ -10,24 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Node multi-engine architecture: `AbstractEngine` base with `ChatEngine`/`ImageEngine` families and a `model_id → engine_type` router (foundation for image generation)
 - `FluxEngine` — Flux Schnell text-to-image via Diffusers (bfloat16, 1024×1024 / 4 steps defaults); heavy GPU deps imported lazily
+- `OrvixImageEngine` — 4-step distilled text-to-image via Diffusers (fp16, guidance-free); no gated upstream access and a smaller on-disk footprint than Flux Schnell, so it is the node's default registered image engine (`FluxEngine` stays in the codebase, unregistered, for a future gated-access re-enable)
 - Node advertises `engines` + `vram_gb` at registration (additive, backward-compatible; image is opt-in via `enable_image_engine`)
 - `image` optional extra (diffusers/transformers/accelerate/…) and opt-in `scripts/download_flux.py` pre-download helper
 - `ModelManager` — swaps chat/image engines through a single GPU's VRAM with a swap lock, drain-before-unload, idle unload (default 10 min), and thrash detection
+- `ModelManager` concurrent mode (`max_resident` param, node config `concurrent_engines`): keeps chat + image both resident in VRAM instead of swapping, for deployments where the combined footprint fits (e.g. an AWQ-quantized chat model next to an image engine) — LRU eviction only kicks in past capacity, per-engine idle unload, `shutdown()` unloads everything resident
 - Managed vLLM mode (`vllm_managed`): the node owns the vLLM server as a subprocess so `unload()` actually frees VRAM for the image engine (start on load, kill on unload)
 - Node `/v1/status` endpoint: current engine, VRAM free/total, uptime, active jobs
 - Config: `vllm_managed`, `idle_unload_minutes`
 - **Image generation (orchestrator):** `POST /v1/images/generations` (OpenAI DALL-E-compatible) — dispatches to an image-capable node, fetches the PNG from the node's binary endpoint, saves it, returns URL/b64
-- `GET /v1/models` catalog endpoint (chat + `flux-schnell` image model)
+- `GET /v1/models` catalog endpoint (chat + `flux-schnell`/`orvix-image-1` image models)
 - Protocol messages `job.image.dispatch` / `job.image.complete` / `job.image.failed`; `RegisterMessage` gains optional `engines[]` + `vram_gb`
 - Node binary endpoint `GET /v1/binary/image/<id>` (per-job `X-Node-Secret` token, stream-then-delete) + node image job handler
 - Node manager reads node capabilities and routes image jobs only to image-capable nodes
 - Migrations `010_image_jobs`, `011_node_capabilities`; config `IMAGE_JOB_TIMEOUT`, `IMAGE_STORAGE_DIR`, `PUBLIC_IMAGE_URL_BASE`; node config `image_tmp_dir`, `binary_public_url`
 - **Quota system:** holder verification (`holder.py`, 15-min cached ORVX balance) + `quota_service`; chat free tier (2 lifetime for non-holders, then pay-or-402), image daily limits (5/day holders; 1/day grace for everyone when `ORVX_MINT_ADDRESS` unset; non-holders 403 when the mint is set; 429 over limit, resets 00:00 UTC). `GET /v1/account/quota`, quota response headers on chat/images. Migration `012_quotas`; config `ORVX_HOLDER_THRESHOLD`, `CHAT_LIFETIME_FREE_LIMIT`, `IMAGE_DAILY_LIMIT_HOLDER`, `IMAGE_DAILY_LIMIT_FALLBACK`, `HOLDER_CACHE_TTL_MINUTES`, `UPGRADE_URL`, `TOKENOMICS_URL`
+- **Public network stats:** `GET /v1/network/stats` — the compute-side dashboard feed (node/GPU capacity, all-time + rolling-window request/token/image volume, avg latency, provider and model counts). Aggregation runs in one DB round trip via the `network_stats()` SQL function (migration `014_network_stats`, plus `created_at` indexes on `jobs`/`image_jobs`); mock jobs are excluded. The snapshot is cached (`NETWORK_STATS_CACHE_SECONDS`, default 30) since the endpoint is unauthenticated, while `nodes.online` is read live from the websocket registry on every call. Config `NETWORK_STATS_CACHE_SECONDS`, `NETWORK_STATS_WINDOW_HOURS`. Complements the existing token-side `GET /v1/staking/network-stats`
 - **Image storage lifecycle:** 24h auto-delete via `scripts/cleanup_images.py` + hourly systemd timer (`scripts/systemd/`), orphan-file + stale-holder sweeps; `MAX_IMAGE_STORAGE_MB` safety cap (503 before quota when full); `GET /v1/admin/storage/stats`; image quota refunded on generation failure; recent-images list on `/v1/account/quota`; node 10-min temp-file sweeper. Docs: operations/api-reference/ARCHITECTURE updated
 
 ### Changed
 - Unified engine lifecycle to `load(model_id)` / `unload` / `is_loaded` across all engines (renamed from `initialize`/`is_ready`/`shutdown`)
 - The executor no longer owns a single backend; it routes each job through the `ModelManager`, loading/swapping the right engine on demand
+- Default image model swapped from `flux-schnell` to `orvix-image-1` (`ImageGenerationRequest` default, node's registered image engine); `flux-schnell` stays in the catalog and router for backward compatibility
+- `ModelManager` no longer holds its lock during the actual `load()`/`unload()` I/O — state transitions are decided and committed under the lock, but the slow work runs with it released. In concurrent mode this was a real bug: a ~60s image cold-load blocked *every* other request (including one for an already-resident, untouched chat engine) because the single lock covering the whole load spanned the entire I/O
 
 ## [0.2.0] — 2026-06-26 — Whitepaper Alignment
 

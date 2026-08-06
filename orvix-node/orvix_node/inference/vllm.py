@@ -21,6 +21,10 @@ Config (env / constructor):
   - ORVIX_NODE_VLLM_MANAGED        "true" to let the node control the subprocess
   - ORVIX_NODE_VLLM_SERVE_CMD      override the launch command; supports
                                    {model} and {port} placeholders
+  - ORVIX_NODE_VLLM_STARTUP_TIMEOUT  seconds to wait for a managed server to
+                                     answer before load() fails (default 180s;
+                                     raise this on slow-import environments,
+                                     e.g. a venv on network-mounted storage)
 
 The orchestrator-facing catalog id (e.g. ``qwen-2.5-7b``) is what the node
 advertises; ``vllm_model`` is the upstream name sent to the vLLM server.
@@ -68,7 +72,7 @@ class VLLMBackend(ChatEngine):
         request_timeout: float = 300.0,
         managed: Optional[bool] = None,
         serve_command: Optional[str] = None,
-        startup_timeout: float = 180.0,
+        startup_timeout: Optional[float] = None,
         stop_timeout: float = 30.0,
     ) -> None:
         self.model = model  # orchestrator-facing catalog id
@@ -85,7 +89,9 @@ class VLLMBackend(ChatEngine):
         self.request_timeout = request_timeout
         self._managed = managed if managed is not None else _env_true("ORVIX_NODE_VLLM_MANAGED")
         self._serve_command = serve_command or os.environ.get("ORVIX_NODE_VLLM_SERVE_CMD") or ""
-        self._startup_timeout = startup_timeout
+        self._startup_timeout = startup_timeout if startup_timeout is not None else float(
+            os.environ.get("ORVIX_NODE_VLLM_STARTUP_TIMEOUT", "180")
+        )
         self._stop_timeout = stop_timeout
         self._client: Optional[httpx.AsyncClient] = None
         self._process: Optional[asyncio.subprocess.Process] = None

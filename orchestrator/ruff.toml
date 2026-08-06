@@ -1,0 +1,9 @@
+# Pinned lint surface. `ruff check` with no config uses whatever the installed
+# ruff version happens to default to — ruff 0.16 widened that set and turned a
+# previously-green tree into 220 findings. Declaring the rules explicitly means a
+# version bump changes behaviour only when we ask it to.
+target-version = "py311"
+
+[lint]
+# Ruff's classic default set: pycodestyle errors + pyflakes.
+select = ["E4", "E7", "E9", "F"]

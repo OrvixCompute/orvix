@@ -62,8 +62,12 @@ class HealthServer:
     """Runs the health app as a background uvicorn server in the current loop."""
 
     def __init__(
-        self, port: int, host: str = "127.0.0.1", manager: Optional["object"] = None
+        self, port: int, host: str = "0.0.0.0", manager: Optional["object"] = None
     ) -> None:
+        # Binds all interfaces by default: the binary endpoint must be reachable
+        # from outside the container (the orchestrator fetches generated images
+        # over this port through the provider's port-forward/proxy). It's safe
+        # to expose — /v1/binary/image/<id> requires a per-job token.
         config = uvicorn.Config(
             create_health_app(manager),
             host=host,
@@ -74,10 +78,11 @@ class HealthServer:
         self._server = uvicorn.Server(config)
         self._task: asyncio.Task | None = None
         self._port = port
+        self._host = host
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._server.serve(), name="health-server")
-        logger.info("Health endpoint on http://127.0.0.1:{}/health", self._port)
+        logger.info("Health endpoint on http://{}:{}/health", self._host, self._port)
 
     async def stop(self) -> None:
         self._server.should_exit = True

@@ -6,7 +6,7 @@ routes under test — no network, no real database required.
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 
@@ -212,6 +212,9 @@ class _Rpc:
         if self.fn in ("record_buyback", "record_burn", "record_job_revenue_split"):
             return self._execute_accounting()
 
+        if self.fn == "network_stats":
+            return self._execute_network_stats()
+
         users = self.db._table("users")
         uid = self.params["p_user_id"]
         amt = Decimal(str(self.params["p_amount"]))
@@ -306,6 +309,83 @@ class _Rpc:
             )
             return _Result(True)
         raise ValueError(f"Unknown rpc: {self.fn}")
+
+    def _execute_network_stats(self):
+        """Mirror migrations/014_network_stats.sql against the in-memory tables."""
+        window_hours = self.params.get("p_window_hours", 24)
+        since = (
+            datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        ).isoformat()  # ISO-8601 UTC sorts lexicographically, same as the rows
+
+        nodes = self.db._table("nodes").rows
+        users = self.db._table("users").rows
+        jobs = [
+            j
+            for j in self.db._table("jobs").rows
+            if j.get("status") == "completed" and not j.get("is_mock")
+        ]
+        images = self.db._table("image_jobs").rows
+
+        def _in_window(rows):
+            return [r for r in rows if (r.get("created_at") or "") >= since]
+
+        gpu_counts: dict[str, int] = {}
+        for n in nodes:
+            if n.get("gpu_model"):
+                gpu_counts[n["gpu_model"]] = gpu_counts.get(n["gpu_model"], 0) + 1
+
+        def _tokens(j) -> int:
+            # total_tokens is a generated column in Postgres; derive it here.
+            if j.get("total_tokens") is not None:
+                return int(j["total_tokens"])
+            return int(j.get("prompt_tokens", 0) or 0) + int(j.get("completion_tokens", 0) or 0)
+
+        window_jobs = _in_window(jobs)
+        latencies = [j["latency_ms"] for j in window_jobs if j.get("latency_ms") is not None]
+
+        return _Result(
+            {
+                "window_hours": window_hours,
+                "nodes": {
+                    "registered": len(nodes),
+                    "ready": sum(1 for n in nodes if n.get("status") == "ready"),
+                    "busy": sum(1 for n in nodes if n.get("status") == "busy"),
+                    "draining": sum(1 for n in nodes if n.get("status") == "draining"),
+                    "offline": sum(1 for n in nodes if n.get("status") == "offline"),
+                    "chat_capable": sum(1 for n in nodes if "chat" in (n.get("engines") or [])),
+                    "image_capable": sum(1 for n in nodes if "image" in (n.get("engines") or [])),
+                    "total_vram_gb": float(
+                        sum(Decimal(str(n.get("vram_gb", 0) or 0)) for n in nodes)
+                    ),
+                },
+                "gpus": [
+                    {"gpu_model": m, "count": c}
+                    for m, c in sorted(gpu_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+                ],
+                "providers": {
+                    "total": sum(1 for u in users if u.get("is_provider")),
+                    "staked": sum(
+                        1
+                        for u in users
+                        if u.get("is_provider")
+                        and Decimal(str(u.get("staked_orvx", 0) or 0)) > 0
+                    ),
+                },
+                "chat": {
+                    "requests_total": len(jobs),
+                    "requests_window": len(window_jobs),
+                    "tokens_total": sum(_tokens(j) for j in jobs),
+                    "tokens_window": sum(_tokens(j) for j in window_jobs),
+                    "avg_latency_ms": (
+                        round(sum(latencies) / len(latencies)) if latencies else None
+                    ),
+                },
+                "images": {
+                    "generated_total": len(images),
+                    "generated_window": len(_in_window(images)),
+                },
+            }
+        )
 
     def _execute_accounting(self):
         p = self.params

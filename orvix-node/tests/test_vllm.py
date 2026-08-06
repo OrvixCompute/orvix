@@ -124,6 +124,25 @@ async def test_model_mapping(make_backend):
     await b.unload()
 
 
+def test_startup_timeout_defaults_to_180():
+    b = VLLMBackend(model=CATALOG, inference_endpoint=ENDPOINT, vllm_model=VLLM_MODEL)
+    assert b._startup_timeout == 180.0
+
+
+def test_startup_timeout_env_override(monkeypatch):
+    monkeypatch.setenv("ORVIX_NODE_VLLM_STARTUP_TIMEOUT", "420")
+    b = VLLMBackend(model=CATALOG, inference_endpoint=ENDPOINT, vllm_model=VLLM_MODEL)
+    assert b._startup_timeout == 420.0
+
+
+def test_startup_timeout_constructor_arg_wins_over_env(monkeypatch):
+    monkeypatch.setenv("ORVIX_NODE_VLLM_STARTUP_TIMEOUT", "420")
+    b = VLLMBackend(
+        model=CATALOG, inference_endpoint=ENDPOINT, vllm_model=VLLM_MODEL, startup_timeout=5
+    )
+    assert b._startup_timeout == 5.0
+
+
 async def test_load_checks_local_vllm(patch_async_client):
     # load() probes the local vLLM server's model list (GET /models).
     patch_async_client(_default_handler)

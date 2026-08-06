@@ -139,6 +139,16 @@ class Settings(BaseSettings):
         "https://orvix.network/tokenomics", description="Shown when image access needs ORVX"
     )
 
+    # --- Chat generation -----------------------------------------------
+    CHAT_JOB_TIMEOUT: int = Field(
+        60,
+        description=(
+            "Seconds to wait for a node to complete a chat job. Raise this if "
+            "nodes swap between chat/image engines and the swap-back (e.g. a "
+            "managed vLLM cold start) can exceed the default."
+        ),
+    )
+
     # --- Image generation --------------------------------------------------
     IMAGE_JOB_TIMEOUT: int = Field(
         90, description="Seconds to wait for a node to complete an image job"
@@ -178,6 +188,19 @@ class Settings(BaseSettings):
     )
     ENABLE_HOT_SWEEPER: bool = Field(
         False, description="Start the daily hot-wallet sweeper (usually run via systemd timer instead)"
+    )
+
+    # --- Public network stats ----------------------------------------------
+    NETWORK_STATS_CACHE_SECONDS: int = Field(
+        30,
+        description=(
+            "How long GET /v1/network/stats is served from cache. The endpoint is "
+            "public and unauthenticated, so the cache is what keeps the aggregation "
+            "off the database on every page load. Set to 0 to disable."
+        ),
+    )
+    NETWORK_STATS_WINDOW_HOURS: int = Field(
+        24, description="Rolling window for the *_window counters in /v1/network/stats"
     )
 
     # --- Governance (Snapshot.org) -----------------------------------------

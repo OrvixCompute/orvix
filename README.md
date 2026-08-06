@@ -24,7 +24,7 @@ open, community-owned inference with no vendor lock-in.
 
 ## ⚡ Quick links
 
-- 🌐 Website — https://orvix.network *(placeholder)*
+- 🌐 Website — https://orvix.network
 - 📚 Documentation — https://docs.orvix.network *(placeholder)*
 - 🧩 API reference — [orchestrator/README.md](orchestrator/README.md)
 - 📄 Whitepaper — *coming soon*
@@ -75,6 +75,17 @@ curl https://api.orvix.network/v1/chat/completions \
   }'
 ```
 
+Image generation works the same way, OpenAI DALL-E-compatible:
+
+```bash
+curl -X POST https://api.orvix.network/v1/images/generations \
+  -H "Authorization: Bearer orvx_sk_your_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "orvix-image-1", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'
+```
+
+See [docs/api-reference.md](docs/api-reference.md) for the full endpoint list.
+
 **For providers (run a node):**
 
 ```bash
@@ -89,20 +100,24 @@ orvix-node start
 
 - **Backend:** Python 3.11+, FastAPI, Supabase (PostgreSQL), Solana via `solders` (wallet auth)
 - **Transport:** WebSocket between orchestrator and nodes
-- **Inference:** vLLM (planned) — targeting Llama 3, Mistral, and Qwen families
+- **Inference:** vLLM for chat (Qwen, Mistral, Llama families) and Diffusers for image
+  generation
 - **Node:** asyncio, `websockets`, GPU detection with a stub mode for GPU-less development
 
 ## 📍 Project status
 
-**Active development — backend MVP + tokenomics complete, public testnet incoming.**
+**Active development — backend MVP + tokenomics complete, image generation live, public testnet incoming.**
 
 Both packages are built and unit-tested, with a cross-process end-to-end flow verified
-(node ↔ orchestrator over WebSocket). The ORVX utility model is implemented: provider
-staking (25k ORVX minimum), stake-based pricing tiers, a 70/30 revenue split feeding a
-50/30/20 buyback/treasury/operations flow, manual buyback (Jupiter) and monthly burn
-tooling, and Snapshot-based governance. On-chain buyback/burn execution is stub-gated
-pending devnet testing. Real GPU inference (vLLM) and a public deployment are the next
-milestones. See [CHANGELOG.md](CHANGELOG.md) and [docs/tokenomics.md](docs/tokenomics.md).
+(node ↔ orchestrator over WebSocket). The orchestrator and frontend are deployed at
+https://orvix.network. The ORVX utility model is implemented: provider staking (25k
+ORVX minimum), stake-based pricing tiers, a 70/30 revenue split feeding a 50/30/20
+buyback/treasury/operations flow, manual buyback (Jupiter) and monthly burn tooling, and
+Snapshot-based governance. On-chain buyback/burn execution is stub-gated pending devnet
+testing. Real GPU inference is implemented for chat (vLLM) and image generation and has
+been verified end-to-end on a GPU node; keeping a node continuously online in production
+is the next milestone. See [CHANGELOG.md](CHANGELOG.md) and
+[docs/tokenomics.md](docs/tokenomics.md).
 
 ## ⚠️ Alpha state disclosures
 
@@ -129,8 +144,8 @@ have early users discover it the hard way. As of this release:
 - **Single-process scale.** Auth challenge nonces and API rate limits are held
   in-memory, so the orchestrator runs as a single worker for now. Multi-worker /
   horizontal scaling (Redis-backed state) comes when real traffic warrants it.
-- **Endpoints and links are placeholders.** `orvix.network`, `docs.orvix.network`, and the
-  `get.orvix.network` install script are not live yet.
+- **Some endpoints and links are still placeholders.** `orvix.network` is live;
+  `docs.orvix.network` and the `get.orvix.network` install script are not live yet.
 
 Expect breaking changes. Track progress in [CHANGELOG.md](CHANGELOG.md).
 

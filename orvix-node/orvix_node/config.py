@@ -51,7 +51,7 @@ class NodeConfig(BaseModel):
     json_logs: bool = False
     # Inference backend: "mock" (default) or "vllm".
     backend: str = "mock"
-    # Advertise image (Flux) capability at registration. Opt-in: only enable once
+    # Advertise image-generation capability at registration. Opt-in: only enable once
     # the ModelManager swap logic is deployed, else the node would advertise an
     # engine it cannot yet serve. Dual-mode (chat + image on one GPU) also needs
     # vllm_managed=true so the manager can free VRAM by stopping the vLLM server.
@@ -62,6 +62,11 @@ class NodeConfig(BaseModel):
     vllm_managed: bool = False
     # Unload the resident engine after this many idle minutes to free VRAM.
     idle_unload_minutes: int = 10
+    # Keep chat + image both resident in VRAM instead of swapping between
+    # them. Only enable this once you've confirmed both engines' combined
+    # VRAM footprint fits the GPU (e.g. an AWQ/quantized chat model next to
+    # an image engine) — the manager does not check this for you.
+    concurrent_engines: bool = False
     # Where generated images are written before the orchestrator fetches them.
     image_tmp_dir: str = "/tmp/node-images"
     # Externally reachable base URL for this node's binary endpoint (the
@@ -148,7 +153,7 @@ max_concurrent_jobs: 4
 backend: "mock"        # "mock" or "vllm"
 
 # Engines / VRAM (single-GPU swap):
-enable_image_engine: false   # advertise + serve Flux images (needs vllm_managed for dual-mode)
+enable_image_engine: false   # advertise + serve image generation (needs vllm_managed for dual-mode)
 vllm_managed: false          # node owns the vLLM server subprocess (kill on unload to free VRAM)
 idle_unload_minutes: 10      # unload the resident engine after this many idle minutes
 

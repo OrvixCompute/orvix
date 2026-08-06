@@ -38,8 +38,12 @@ MAX_BACKOFF = 60.0
 
 
 class OrchestratorClient:
-    def __init__(self, config: NodeConfig) -> None:
+    def __init__(self, config: NodeConfig, extra_models: list[str] | None = None) -> None:
         self.config = config
+        # Catalog ids served by engines other than the primary chat model
+        # (e.g. the image engine's supported_models), advertised alongside
+        # config.model so the orchestrator can route jobs to this node.
+        self._extra_models = extra_models or []
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._outbound: asyncio.Queue[BaseMessage] = asyncio.Queue()
         self._job_handler: JobHandler | None = None
@@ -178,7 +182,7 @@ class OrchestratorClient:
             node_secret=self.config.node_secret,
             version=__version__,
             gpu_info=gpu,
-            models_supported=[self.config.model],
+            models_supported=[self.config.model, *self._extra_models],
             max_concurrent_jobs=self.config.max_concurrent_jobs,
             engines=available_engine_types(self.config.enable_image_engine),
             vram_gb=round(gpu.vram_total_mb / 1024, 1) if gpu.vram_total_mb else 0.0,

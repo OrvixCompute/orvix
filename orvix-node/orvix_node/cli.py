@@ -12,6 +12,7 @@ import click
 
 from orvix_node.config import config_path, init_config_file, load_config
 from orvix_node.exceptions import AuthError, ConfigError
+from orvix_node.inference.router import models_for_engine
 from orvix_node.version import __version__
 
 
@@ -96,13 +97,17 @@ async def _run_agent(cfg) -> None:
 
     engines = {"chat": chat_engine}
     if cfg.enable_image_engine:
-        from orvix_node.inference.flux import FluxEngine
+        from orvix_node.inference.orvix_image import OrvixImageEngine
 
-        engines["image"] = FluxEngine()
-        logger.info("Image engine (Flux) enabled — chat<->image will swap on demand.")
+        engines["image"] = OrvixImageEngine()
+        mode = "resident concurrently" if cfg.concurrent_engines else "swap on demand"
+        logger.info("Image engine enabled — chat<->image will {}.", mode)
 
+    max_resident = len(engines) if cfg.concurrent_engines else 1
     manager = ModelManager(
-        engines, idle_timeout_seconds=cfg.idle_unload_minutes * 60
+        engines,
+        idle_timeout_seconds=cfg.idle_unload_minutes * 60,
+        max_resident=max_resident,
     )
     binary_base_url = cfg.binary_public_url or f"http://127.0.0.1:{cfg.health_port}"
     executor = JobExecutor(
@@ -115,6 +120,11 @@ async def _run_agent(cfg) -> None:
     # Pre-warm the chat engine so the first request isn't slowed by a cold load.
     async with manager.serving(cfg.model):
         pass
+    # In concurrent mode, also pre-warm image so it's resident from the start
+    # rather than waiting on the first image request to trigger the load.
+    if cfg.concurrent_engines and "image" in engines:
+        async with manager.serving(engines["image"].supported_models[0]):
+            pass
 
     # Background task: unload the resident engine after it goes idle.
     async def _idle_loop() -> None:
@@ -143,7 +153,13 @@ async def _run_agent(cfg) -> None:
     health = HealthServer(cfg.health_port, manager=manager)
     await health.start()
 
-    client = OrchestratorClient(cfg)
+    # Advertise every catalog id the router maps to "image", not just this
+    # engine's own upstream model — the concrete image engine ignores the
+    # requested id anyway (see OrvixImageEngine/FluxEngine.load), and
+    # clients/frontends may still request an older catalog id (e.g.
+    # "flux-schnell") that now routes to whichever image engine is running.
+    image_models = models_for_engine("image") if "image" in engines else None
+    client = OrchestratorClient(cfg, extra_models=image_models)
 
     async def job_handler(job) -> None:
         await executor.execute(

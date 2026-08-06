@@ -162,3 +162,143 @@ async def test_missing_engine_type_raises():
     mgr = ModelManager({"chat": FakeEngine("chat")})  # no image engine
     with pytest.raises(ValueError, match="No engine registered"):
         await mgr.acquire("flux-schnell")
+
+
+# --- concurrent mode (max_resident >= number of engines) -------------------
+
+
+async def test_concurrent_mode_keeps_both_resident_no_eviction():
+    chat, img = FakeEngine("chat"), FakeEngine("image")
+    mgr = ModelManager({"chat": chat, "image": img}, max_resident=2)
+    async with mgr.serving("qwen-2.5-7b"):
+        pass
+    async with mgr.serving("flux-schnell"):
+        pass
+    # Loading image must NOT have evicted chat — both fit within max_resident.
+    assert chat.unloads == 0
+    assert img.unloads == 0
+    assert sorted(mgr.status()["loaded_engines"]) == ["chat", "image"]
+
+    # Both are fast-path now: neither reloads on a repeat request.
+    async with mgr.serving("qwen-2.5-7b"):
+        pass
+    async with mgr.serving("flux-schnell"):
+        pass
+    assert chat.loads == ["qwen-2.5-7b"]
+    assert img.loads == ["flux-schnell"]
+
+
+async def test_concurrent_mode_serves_both_simultaneously():
+    chat, img = FakeEngine("chat"), FakeEngine("image")
+    mgr = ModelManager({"chat": chat, "image": img}, max_resident=2)
+    chat_engine = await mgr.acquire("qwen-2.5-7b")
+    # While a chat job is in flight (not released), an image request must NOT
+    # block on it — they coexist.
+    img_engine = await asyncio.wait_for(mgr.acquire("flux-schnell"), timeout=1)
+    assert chat_engine is chat
+    assert img_engine is img
+    assert mgr.status()["active_jobs"] == {"chat": 1, "image": 1}
+    await mgr.release("chat")
+    await mgr.release("image")
+
+
+async def test_concurrent_mode_evicts_lru_when_over_capacity(monkeypatch):
+    import orvix_node.inference.manager as manager_mod
+
+    a, b, c = FakeEngine("a"), FakeEngine("b"), FakeEngine("c")
+    mgr = ModelManager({"a": a, "b": b, "c": c}, max_resident=2)
+    monkeypatch.setattr(
+        manager_mod,
+        "engine_type_for",
+        {"model-a": "a", "model-b": "b", "model-c": "c"}.__getitem__,
+    )
+
+    async with mgr.serving("model-a"):
+        pass
+    async with mgr.serving("model-b"):
+        pass
+    assert sorted(mgr.status()["loaded_engines"]) == ["a", "b"]
+
+    # At capacity (2/2); "a" is the least-recently-used idle engine, so
+    # requesting "c" must evict "a", not "b".
+    async with mgr.serving("model-c"):
+        pass
+    assert a.unloads == 1
+    assert b.unloads == 0
+    assert sorted(mgr.status()["loaded_engines"]) == ["b", "c"]
+
+
+async def test_idle_check_unloads_each_engine_independently():
+    clock = Clock()
+    chat, img = FakeEngine("chat"), FakeEngine("image")
+    mgr = ModelManager(
+        {"chat": chat, "image": img}, idle_timeout_seconds=600, clock=clock, max_resident=2
+    )
+    async with mgr.serving("qwen-2.5-7b"):
+        pass
+    clock.advance(300)
+    async with mgr.serving("flux-schnell"):
+        pass
+
+    clock.advance(301)  # chat now idle 601s, image idle 301s
+    await mgr.idle_check()
+    assert chat.unloads == 1
+    assert img.unloads == 0
+    assert mgr.status()["loaded_engines"] == ["image"]
+
+    clock.advance(300)  # image now idle 601s
+    await mgr.idle_check()
+    assert img.unloads == 1
+    assert mgr.status()["loaded_engines"] == []
+
+
+async def test_already_loaded_engine_not_blocked_by_concurrent_load():
+    """Regression test: acquiring an already-resident engine must not wait on
+    an unrelated engine's slow concurrent load — only requests for the engine
+    actually being loaded should block."""
+
+    class SlowLoadEngine(FakeEngine):
+        def __init__(self, engine_type: str):
+            super().__init__(engine_type)
+            self.load_gate = asyncio.Event()
+
+        async def load(self, model_id: str) -> None:
+            await self.load_gate.wait()  # simulates a slow cold load
+            await super().load(model_id)
+
+    chat = FakeEngine("chat")
+    img = SlowLoadEngine("image")
+    mgr = ModelManager({"chat": chat, "image": img}, max_resident=2)
+
+    # Warm chat up front so it's already resident.
+    async with mgr.serving("qwen-2.5-7b"):
+        pass
+
+    # Kick off a slow image load; it will hang on load_gate until released.
+    img_task = asyncio.create_task(mgr.acquire("flux-schnell"))
+    await asyncio.sleep(0.05)
+    assert not img_task.done()
+
+    # Chat must still be served immediately — it is not touched by the image
+    # load and must not be blocked by the manager's internal lock.
+    chat_engine = await asyncio.wait_for(mgr.acquire("qwen-2.5-7b"), timeout=0.2)
+    assert chat_engine is chat
+    await mgr.release("chat")
+
+    img.load_gate.set()
+    img_engine = await asyncio.wait_for(img_task, timeout=1)
+    assert img_engine is img
+    await mgr.release("image")
+
+
+async def test_shutdown_unloads_all_resident_engines():
+    chat, img = FakeEngine("chat"), FakeEngine("image")
+    mgr = ModelManager({"chat": chat, "image": img}, max_resident=2)
+    async with mgr.serving("qwen-2.5-7b"):
+        pass
+    async with mgr.serving("flux-schnell"):
+        pass
+    await mgr.shutdown()
+    assert chat.unloads == 1
+    assert img.unloads == 1
+    assert mgr.status()["loaded_engines"] == []
