@@ -195,6 +195,113 @@ async def test_execute_image_success(tmp_path):
     assert binary._registry[msg.image_id]["token"] == "tok"
 
 
+class SlowImageEngine(ImageEngine):
+    """Tracks max concurrency to verify the image-specific semaphore."""
+
+    def __init__(self):
+        self.active = 0
+        self.max_active = 0
+        self._loaded = False
+
+    async def load(self, model_id): self._loaded = True
+    async def unload(self): self._loaded = False
+    async def is_loaded(self): return self._loaded
+
+    async def infer(self, request: ImageRequest) -> ImageResult:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0.1)
+        finally:
+            self.active -= 1
+        return ImageResult(png_bytes=b"IMGDATA", metadata={})
+
+
+async def test_image_jobs_serialize_by_default(tmp_path):
+    # One diffusion pass at a time: several GB of transient VRAM per job means
+    # two concurrent generations OOM a card that handles one fine.
+    engine = SlowImageEngine()
+    ex = JobExecutor(
+        ModelManager({"image": engine}), image_tmp_dir=str(tmp_path), binary_base_url="http://n:9000"
+    )
+    sink = Collector()
+    await asyncio.gather(
+        *[
+            ex.execute_image(_image_dispatch(job_id=f"ij{i}"), send_complete=sink, send_failed=sink)
+            for i in range(3)
+        ]
+    )
+    assert engine.max_active == 1
+    assert len(sink.messages) == 3
+    assert all(m.type == "job.image.complete" for m in sink.messages)
+
+
+async def test_image_limit_is_configurable(tmp_path):
+    engine = SlowImageEngine()
+    ex = JobExecutor(
+        ModelManager({"image": engine}),
+        image_tmp_dir=str(tmp_path),
+        binary_base_url="http://n:9000",
+        max_concurrent_image=2,
+    )
+    sink = Collector()
+    await asyncio.gather(
+        *[
+            ex.execute_image(_image_dispatch(job_id=f"ij{i}"), send_complete=sink, send_failed=sink)
+            for i in range(3)
+        ]
+    )
+    assert engine.max_active == 2
+
+
+async def test_image_job_does_not_consume_a_chat_slot(tmp_path):
+    """A chat job must be able to start while an image job is mid-generation.
+
+    Both engines wait on the other's start signal, so this only completes if the
+    two limits are genuinely separate — a shared semaphore deadlocks here.
+    """
+    chat_started, image_started = asyncio.Event(), asyncio.Event()
+
+    class HandshakeChat(ChatEngine):
+        async def load(self, model_id): pass
+        async def unload(self): pass
+        async def is_loaded(self): return True
+
+        async def generate(self, request: GenerateRequest) -> GenerateResponse:
+            chat_started.set()
+            await asyncio.wait_for(image_started.wait(), timeout=5)
+            return GenerateResponse(content="x", prompt_tokens=1, completion_tokens=1)
+
+        async def generate_stream(self, request) -> AsyncIterator[GenerateChunk]:
+            yield GenerateChunk(is_final=True, usage=GenerateUsage(prompt_tokens=1, completion_tokens=1))
+
+    class HandshakeImage(ImageEngine):
+        async def load(self, model_id): pass
+        async def unload(self): pass
+        async def is_loaded(self): return True
+
+        async def infer(self, request: ImageRequest) -> ImageResult:
+            image_started.set()
+            await asyncio.wait_for(chat_started.wait(), timeout=5)
+            return ImageResult(png_bytes=b"IMGDATA", metadata={})
+
+    # max_resident=2 mirrors concurrent_engines: both engines stay in VRAM.
+    mgr = ModelManager({"chat": HandshakeChat(), "image": HandshakeImage()}, max_resident=2)
+    # A single chat slot: if image jobs took one, the two could never overlap.
+    ex = JobExecutor(
+        mgr, max_concurrent=1, image_tmp_dir=str(tmp_path), binary_base_url="http://n:9000"
+    )
+    sink = Collector()
+
+    await asyncio.gather(
+        ex.execute(_job(), send_chunk=sink, send_result=sink),
+        ex.execute_image(_image_dispatch(), send_complete=sink, send_failed=sink),
+    )
+
+    assert {m.type for m in sink.messages} == {"job_result", "job.image.complete"}
+    assert all(getattr(m, "status", "completed") == "completed" for m in sink.messages)
+
+
 async def test_execute_image_no_engine_fails(tmp_path):
     # Manager has no image engine -> acquire raises -> failure reported.
     mgr = ModelManager({"chat": MockBackend("p")})

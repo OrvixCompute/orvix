@@ -343,8 +343,13 @@ curl -X POST https://api.orvix.network/v1/images/generations \
 
 Request: `model` (`orvix-image-1`, default; `flux-schnell` also defined in
 the catalog but not currently served by any node), `prompt`, `n` (1–4),
-`size` (up to `1024x1024` for `orvix-image-1`, up to `1536x1536` for
-`flux-schnell`), `response_format` (`url` | `b64_json`).
+`size`, `response_format` (`url` | `b64_json`).
+
+`size` must be one of `256x256`, `512x512`, `1024x1024` or `1536x1536`, and is
+additionally capped by the model's `max_size` in `GET /v1/models` — so
+`orvix-image-1` accepts up to `1024x1024` and `flux-schnell` up to `1536x1536`.
+Anything larger is rejected with `400 invalid_size` listing the sizes that model
+does accept.
 
 Response: `{"created": ..., "data": [{"url": "https://orvix.network/images/<id>.png"}]}`.
 Quota headers: `X-Orvix-Quota-Remaining`, `X-Orvix-Quota-Reset`.

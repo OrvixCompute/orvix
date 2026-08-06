@@ -34,7 +34,7 @@ from app.dependencies import get_user_from_api_key
 from app.exceptions import OrvixException, ValidationError
 from app.logger import logger
 from app.models.image import ImageGenerationRequest
-from app.models.inference import IMAGE_MODELS
+from app.models.inference import IMAGE_MODELS, image_model_max_size
 from app.models.protocol import ImageJobDispatchMessage
 from app.services import quota_service, storage_service
 from app.services.holder import holder_service
@@ -42,17 +42,34 @@ from app.services.node_manager import NodeTimeoutError, node_manager
 
 router = APIRouter(prefix="/v1", tags=["images"])
 
+# Sizes the endpoint understands at all. Whether a *given model* will accept one
+# is a separate question — see _parse_size, which narrows this by the model's
+# catalog max_size. Offering a size no model can serve just moves the failure to
+# the node, which reports it as a failed job long after quota was consumed.
 _ALLOWED_SIZES = {"256x256", "512x512", "1024x1024", "1024x1792", "1792x1024", "1536x1536"}
 
 
-def _parse_size(size: str) -> tuple[int, int]:
-    if size not in _ALLOWED_SIZES:
+def _sizes_for_model(max_width: int, max_height: int) -> list[str]:
+    """The subset of _ALLOWED_SIZES that fits within a model's declared maximum."""
+    fitting = []
+    for size in _ALLOWED_SIZES:
+        width, height = (int(part) for part in size.split("x"))
+        if width <= max_width and height <= max_height:
+            fitting.append(size)
+    return sorted(fitting)
+
+
+def _parse_size(size: str, model: str) -> tuple[int, int]:
+    normalized = size.strip().lower()
+    allowed = _sizes_for_model(*image_model_max_size(model))
+    if normalized not in allowed:
         raise ValidationError(
-            f"Unsupported size '{size}'. Choose one of: {', '.join(sorted(_ALLOWED_SIZES))}",
+            f"Unsupported size '{size}' for model '{model}'. "
+            f"Choose one of: {', '.join(allowed)}",
             error_code="invalid_size",
         )
-    w, h = size.lower().split("x")
-    return int(w), int(h)
+    width, height = normalized.split("x")
+    return int(width), int(height)
 
 
 async def _fetch_image_bytes(binary_url: str, token: str) -> bytes:
@@ -88,7 +105,7 @@ async def images_generations(
             f"{', '.join(IMAGE_MODELS)}",
             error_code="model_not_found",
         )
-    width, height = _parse_size(body.size)
+    width, height = _parse_size(body.size, body.model)
 
     # Storage safety cap — refuse before consuming quota when the disk is full.
     if storage_service.current_size_mb() > settings.MAX_IMAGE_STORAGE_MB:

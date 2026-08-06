@@ -48,6 +48,11 @@ class NodeConfig(BaseModel):
     log_level: str = "INFO"
     log_file: str = ""  # resolved to default_log_file() if empty
     max_concurrent_jobs: int = 4
+    # Image jobs are limited separately from chat: a single diffusion pass needs
+    # several GB of transient VRAM on top of the resident weights, so two at once
+    # can OOM a card that serves one alongside a chat engine without trouble.
+    # Only raise this if you have measured the headroom on your own GPU.
+    max_concurrent_image_jobs: int = 1
     json_logs: bool = False
     # Inference backend: "mock" (default) or "vllm".
     backend: str = "mock"

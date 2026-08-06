@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default image model swapped from `flux-schnell` to `orvix-image-1` (`ImageGenerationRequest` default, node's registered image engine); `flux-schnell` stays in the catalog and router for backward compatibility
 - `ModelManager` no longer holds its lock during the actual `load()`/`unload()` I/O — state transitions are decided and committed under the lock, but the slow work runs with it released. In concurrent mode this was a real bug: a ~60s image cold-load blocked *every* other request (including one for an already-resident, untouched chat engine) because the single lock covering the whole load spanned the entire I/O
 
+### Fixed
+- `POST /v1/images/generations` validated the requested size against one global list, ignoring the model's catalog `max_size`. Sizes the chosen model cannot serve were accepted and dispatched, so the failure surfaced on the node — after a job slot and quota had already been spent — instead of as a 400. Sizes are now checked per model, and the error lists only what that model actually offers. Two entries in the list (`1024x1792`, `1792x1024`) exceeded every model's maximum *and* the node protocol's own 1536-per-dimension cap, so they could never have succeeded for anyone
+- The node executor limited chat and image jobs with a single shared semaphore, so `max_concurrent_jobs: 4` allowed four simultaneous diffusion passes. A generation needs several GB of transient VRAM on top of the resident weights — measured at 19.6 of 20.4 GiB for one 1024×1024 pass next to a resident chat engine — so two at once OOM a card that serves one comfortably. Image jobs now have their own limit (`max_concurrent_image_jobs`, default 1) and no longer occupy chat slots; chat and image still run concurrently
+
 ## [0.2.0] — 2026-06-26 — Whitepaper Alignment
 
 ### Added
