@@ -65,6 +65,11 @@ class RegisterMessage(BaseMessage):
     # backward compatibility: older nodes omit them.
     engines: List[str] = Field(default_factory=list)
     vram_gb: float = 0.0
+    # Identity the node keeps across reconnects, so one machine stays one row in
+    # `nodes` instead of leaving an offline ghost behind on every restart.
+    # Optional: older nodes omit it and the orchestrator assigns one per
+    # connection, which is the old behaviour.
+    node_id: Optional[str] = None
 
 
 class HeartbeatMessage(BaseMessage):
