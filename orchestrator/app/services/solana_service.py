@@ -36,12 +36,23 @@ class SolanaService:
         return data.get("result")
 
     async def get_signatures_for_address(
-        self, address: str, limit: int = 25, until: Optional[str] = None
+        self,
+        address: str,
+        limit: int = 25,
+        until: Optional[str] = None,
+        before: Optional[str] = None,
     ) -> list[dict]:
-        """Most-recent-first signatures touching `address`."""
+        """Most-recent-first signatures touching `address`.
+
+        `until` stops at a signature already handled; `before` starts the page
+        older than a given signature. Together they page backwards through a
+        backlog: `until` marks where to stop, `before` walks towards it.
+        """
         opts: dict[str, Any] = {"limit": limit}
         if until:
             opts["until"] = until
+        if before:
+            opts["before"] = before
         return await self._rpc("getSignaturesForAddress", [address, opts]) or []
 
     async def get_parsed_transaction(self, signature: str) -> Optional[dict]:

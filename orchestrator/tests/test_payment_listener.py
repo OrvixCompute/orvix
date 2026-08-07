@@ -411,7 +411,7 @@ async def test_each_address_keeps_its_own_cursor(db, listener, monkeypatch):
     seen = []
 
     class _Sol:
-        async def get_signatures_for_address(self, address, limit=25, until=None):
+        async def get_signatures_for_address(self, address, limit=25, until=None, before=None):
             seen.append((address, until))
             return [{"signature": f"sig-{address}", "err": None}]
 
@@ -429,3 +429,74 @@ async def test_each_address_keeps_its_own_cursor(db, listener, monkeypatch):
 
 async def _noop():
     return None
+
+
+# --- cursor persistence and catch-up ---------------------------------------
+#
+# The cursor used to live only in memory. A restart forgot it, so a cold start
+# could never look further back than one page — and if more than a page landed
+# between two polls, the cursor jumped to the newest and the middle was never
+# read.
+
+
+async def test_cursor_survives_a_restart(db, listener, monkeypatch):
+    import app.services.payment_listener as pl
+
+    monkeypatch.setattr(pl, "get_supabase", lambda: db)
+    listener._save_cursor("ata", "sig-newest")
+
+    # A fresh listener, as after a process restart.
+    revived = pl.PaymentListener()
+    monkeypatch.setattr(pl, "get_supabase", lambda: db)
+    revived._load_cursors()
+
+    assert revived._last_signature == {"ata": "sig-newest"}
+
+
+async def test_saving_a_cursor_twice_updates_rather_than_duplicates(db, listener, monkeypatch):
+    """Keyed by address, not by id — without on_conflict this inserted rows."""
+    import app.services.payment_listener as pl
+
+    monkeypatch.setattr(pl, "get_supabase", lambda: db)
+    listener._save_cursor("ata", "sig-1")
+    listener._save_cursor("ata", "sig-2")
+
+    rows = db._table("listener_cursors").rows
+    assert len(rows) == 1
+    assert rows[0]["last_signature"] == "sig-2"
+
+
+async def test_a_backlog_larger_than_one_page_is_fully_read(listener):
+    """The gap this closes: `until` stops at the cursor but `limit` still caps
+    the page, so a burst used to leave the middle unread."""
+    import app.services.payment_listener as pl
+
+    total = pl.SIGNATURE_PAGE_SIZE * 3
+    all_sigs = [{"signature": f"sig-{i:03d}", "err": None} for i in range(total)]
+
+    class _Sol:
+        async def get_signatures_for_address(self, address, limit=25, until=None, before=None):
+            start = 0 if before is None else next(
+                i for i, s in enumerate(all_sigs) if s["signature"] == before
+            ) + 1
+            return all_sigs[start : start + limit]
+
+    collected = await listener._fetch_new_signatures(_Sol(), "ata")
+
+    assert len(collected) == total, "every signature in the backlog must be read"
+    assert collected[0]["signature"] == "sig-000"
+    assert collected[-1]["signature"] == f"sig-{total - 1:03d}"
+
+
+async def test_load_cursors_survives_a_database_failure(listener, monkeypatch):
+    """A listener that will not start because it cannot read its bookmark is
+    worse than one that re-reads a page."""
+    import app.services.payment_listener as pl
+
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(pl, "get_supabase", boom)
+    listener._load_cursors()  # must not raise
+
+    assert listener._last_signature == {}

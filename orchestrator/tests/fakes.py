@@ -82,8 +82,12 @@ class _Query:
         self._op, self._values = "insert", values
         return self
 
-    def upsert(self, values):
+    def upsert(self, values, on_conflict=None):
+        # `on_conflict` names the column that decides identity, as PostgREST
+        # does. Without it the fake only ever matched on "id", so a table keyed
+        # by anything else silently inserted duplicates instead of updating.
         self._op, self._values = "upsert", values
+        self._on_conflict = on_conflict
         return self
 
     def update(self, values):
@@ -172,8 +176,9 @@ class _Query:
         if self._op == "upsert":
             rows = self._values if isinstance(self._values, list) else [self._values]
             out = []
+            key = getattr(self, "_on_conflict", None) or "id"
             for r in rows:
-                existing = next((x for x in self.t.rows if x.get("id") == r.get("id")), None)
+                existing = next((x for x in self.t.rows if x.get(key) == r.get(key)), None)
                 if existing is not None:
                     existing.update(r)
                     out.append(dict(existing))

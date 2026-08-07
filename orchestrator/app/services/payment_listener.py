@@ -15,6 +15,14 @@ from app.database import get_supabase
 from app.logger import logger
 from app.services.solana_service import get_solana_service
 
+# One RPC page of signatures. Solana caps this at 1000; 25 keeps each cycle
+# cheap on a quiet address, and the catch-up loop handles busy ones.
+SIGNATURE_PAGE_SIZE = 25
+# Ceiling on how far a single cycle will page back. 40 pages is 1000 signatures
+# — far more than a poll interval can accumulate, and a hard stop against a
+# cursor that has somehow fallen a long way behind.
+MAX_CATCHUP_PAGES = 40
+
 
 class PaymentListener:
     def __init__(self) -> None:
@@ -72,7 +80,83 @@ class PaymentListener:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not resolve treasury token accounts: {}", exc)
 
+    # --- cursors -----------------------------------------------------------
+    def _load_cursors(self) -> None:
+        """Restore how far each address was read before the last shutdown.
+
+        Failure is non-fatal: an empty cursor means the next poll starts from
+        the newest page, which is where the listener always used to start. A
+        listener that refuses to run because it cannot read its bookmark is
+        worse than one that re-reads a page.
+        """
+        try:
+            rows = get_supabase().table("listener_cursors").select("*").execute().data or []
+            self._last_signature = {r["address"]: r["last_signature"] for r in rows}
+            if self._last_signature:
+                logger.info("Restored {} listener cursor(s)", len(self._last_signature))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not load listener cursors (starting fresh): {}", exc)
+
+    def _save_cursor(self, address: str, signature: str) -> None:
+        """Persist progress for one address, after its signatures were handled.
+
+        Written per address rather than in a batch at the end of a cycle: if the
+        process dies mid-cycle, the addresses already finished keep their
+        progress instead of all of them rewinding together.
+        """
+        self._last_signature[address] = signature
+        try:
+            get_supabase().table("listener_cursors").upsert(
+                {
+                    "address": address,
+                    "last_signature": signature,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                on_conflict="address",
+            ).execute()
+        except Exception as exc:  # noqa: BLE001
+            # In-memory cursor still advanced, so this cycle does not loop; the
+            # cost of a failed write is re-reading one page after a restart.
+            logger.warning("Could not persist listener cursor for {}: {}", address, exc)
+
+    async def _fetch_new_signatures(self, sol, address: str) -> list[dict]:
+        """Every signature on `address` newer than its cursor, oldest last.
+
+        Pages backwards rather than taking a single window. `until` stops the
+        RPC at the cursor but `limit` still caps the response, so a burst larger
+        than one page used to leave the middle unread while the cursor jumped to
+        the newest — the gap this exists to close.
+
+        Bounded by MAX_CATCHUP_PAGES so a cursor that is somehow far in the past
+        cannot spin the loop forever. Hitting the cap is logged, because it means
+        older transactions were skipped and that must not pass silently.
+        """
+        cursor = self._last_signature.get(address)
+        collected: list[dict] = []
+        before: str | None = None
+
+        for page in range(MAX_CATCHUP_PAGES):
+            sigs = await sol.get_signatures_for_address(
+                address, limit=SIGNATURE_PAGE_SIZE, until=cursor, before=before
+            )
+            if not sigs:
+                break
+            collected.extend(sigs)
+            if len(sigs) < SIGNATURE_PAGE_SIZE:
+                break  # reached the cursor (or the end of history)
+            before = sigs[-1]["signature"]
+            if page == MAX_CATCHUP_PAGES - 1:
+                logger.error(
+                    "Listener catch-up hit {} pages on {} — older transactions were "
+                    "NOT read. Cursor was {}.",
+                    MAX_CATCHUP_PAGES,
+                    address,
+                    cursor or "unset",
+                )
+        return collected
+
     async def _run(self) -> None:
+        self._load_cursors()
         await self._resolve_treasury_token_accounts()
         while not self._stop.is_set():
             try:
@@ -96,13 +180,13 @@ class PaymentListener:
 
         sol = get_solana_service()
         for address in self._watched_addresses():
-            sigs = await sol.get_signatures_for_address(
-                address, limit=25, until=self._last_signature.get(address)
-            )
+            sigs = await self._fetch_new_signatures(sol, address)
             if not sigs:
                 continue
 
-            # Process oldest-first so the cursor advances monotonically.
+            # Process oldest-first so the cursor advances monotonically: if this
+            # dies partway, the saved cursor is behind the failure rather than
+            # past it, and the rest is retried next cycle.
             for entry in reversed(sigs):
                 signature = entry["signature"]
                 if entry.get("err") is not None:
@@ -112,7 +196,7 @@ class PaymentListener:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Failed processing {}: {}", signature, exc)
 
-            self._last_signature[address] = sigs[0]["signature"]
+            self._save_cursor(address, sigs[0]["signature"])
 
     def _watched_addresses(self) -> list[str]:
         """Addresses to poll for incoming deposits.
