@@ -20,7 +20,10 @@ class PaymentListener:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
-        self._last_signature: str | None = None
+        # Cursor per watched address, not one shared cursor: the addresses are
+        # polled independently and a single cursor would let one address's
+        # newest signature hide another's.
+        self._last_signature: dict[str, str] = {}
         self._treasury_token_accounts: set[str] = set()
         self._treasury_orvx_token_accounts: set[str] = set()
 
@@ -92,23 +95,45 @@ class PaymentListener:
             await self._resolve_treasury_token_accounts()
 
         sol = get_solana_service()
-        sigs = await sol.get_signatures_for_address(
-            settings.TREASURY_WALLET_ADDRESS, limit=25, until=self._last_signature
-        )
-        if not sigs:
-            return
+        for address in self._watched_addresses():
+            sigs = await sol.get_signatures_for_address(
+                address, limit=25, until=self._last_signature.get(address)
+            )
+            if not sigs:
+                continue
 
-        # Process oldest-first so last_signature advances monotonically.
-        for entry in reversed(sigs):
-            signature = entry["signature"]
-            if entry.get("err") is not None:
-                continue  # failed tx
-            try:
-                await self._process_signature(signature)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed processing {}: {}", signature, exc)
+            # Process oldest-first so the cursor advances monotonically.
+            for entry in reversed(sigs):
+                signature = entry["signature"]
+                if entry.get("err") is not None:
+                    continue  # failed tx
+                try:
+                    await self._process_signature(signature)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed processing {}: {}", signature, exc)
 
-        self._last_signature = sigs[0]["signature"]
+            self._last_signature[address] = sigs[0]["signature"]
+
+    def _watched_addresses(self) -> list[str]:
+        """Addresses to poll for incoming deposits.
+
+        The token accounts are the ones that matter, and watching only the owner
+        wallet is why no deposit was ever seen: `getSignaturesForAddress` returns
+        transactions the address appears in, and an SPL transfer into an ATA
+        names the ATA, the mint and the sender — not the ATA's owner. Confirmed
+        against a real 0.11 USDC deposit, which appeared under the treasury's
+        USDC ATA and was entirely absent from the wallet's own history.
+
+        The wallet is still polled: it catches transactions the treasury itself
+        signs, and dropping it would lose that for no gain.
+        """
+        addresses = [settings.TREASURY_WALLET_ADDRESS]
+        addresses.extend(sorted(self._treasury_token_accounts))
+        addresses.extend(sorted(self._treasury_orvx_token_accounts))
+        # Dedupe while keeping order stable, so cursors stay attached to the
+        # same address across cycles.
+        seen: set[str] = set()
+        return [a for a in addresses if a and not (a in seen or seen.add(a))]
 
     async def _process_signature(self, signature: str) -> None:
         db = get_supabase()
