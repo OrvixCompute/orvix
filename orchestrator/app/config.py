@@ -139,13 +139,16 @@ class Settings(BaseSettings):
     IMAGE_DAILY_LIMIT_FALLBACK: int = Field(
         1, description="Daily image generations for everyone when ORVX_MINT_ADDRESS is unset"
     )
-    # PLACEHOLDER PRICE — set this deliberately before charging anyone. It is
-    # priced per 1024x1024 image and scaled by pixel count, because that is what
+    # Priced per 1024x1024 image and scaled by pixel count, because that is what
     # drives the cost: a measured 1024x1024 generation takes ~2.3 s of GPU and
-    # peaks near 19.6 GiB of VRAM, and both scale with area. 0.01 is a round
-    # number, not a researched one.
+    # peaks near 19.6 GiB of VRAM, and both scale with area.
+    #
+    # 0.05 was set deliberately by the operator on 2026-08-07, replacing the 0.01
+    # placeholder this shipped with. It is a pricing decision, not a derived one:
+    # the GPU time is comparable to a chat completion, so the ratio to chat is a
+    # judgement about what the two are worth rather than what they cost to serve.
     IMAGE_PRICE_USDC_PER_MEGAPIXEL: Decimal = Field(
-        Decimal("0.01"),
+        Decimal("0.05"),
         description=(
             "USDC charged per 1024x1024-equivalent image (1.048576 MP). Larger "
             "sizes cost proportionally more, smaller ones less. Applies only "
