@@ -89,7 +89,7 @@ See [docs/api-reference.md](docs/api-reference.md) for the full endpoint list.
 **For providers (run a node):**
 
 ```bash
-curl -fsSL https://get.orvix.network | sh   # placeholder install script
+curl -sSL https://raw.githubusercontent.com/OrvixCompute/orvix/main/orvix-node/install.sh | bash
 orvix-node start
 ```
 
@@ -145,7 +145,8 @@ have early users discover it the hard way. As of this release:
   in-memory, so the orchestrator runs as a single worker for now. Multi-worker /
   horizontal scaling (Redis-backed state) comes when real traffic warrants it.
 - **Some endpoints and links are still placeholders.** `orvix.network` is live;
-  `docs.orvix.network` and the `get.orvix.network` install script are not live yet.
+  `docs.orvix.network` is not live yet, and `orvix-node` is not on PyPI — the
+  installer pulls it straight from this repository instead.
 
 Expect breaking changes. Track progress in [CHANGELOG.md](CHANGELOG.md).
 
