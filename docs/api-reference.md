@@ -145,13 +145,19 @@ Two different 503s, because they call for different responses:
 
 | Code | Meaning | What to do |
 |---|---|---|
-| `capacity_exhausted` | Nodes serve this model but every one is busy | Retry — the body carries `retry_after_seconds` |
+| `capacity_exhausted` | Nodes serve this model but every one stayed busy for the whole wait | Retry — the body carries `retry_after_seconds` |
 | `no_chat_provider` | No node on the network serves this model at all | Retrying will not help; pick a model from `/v1/models` that a node is actually running |
 
 ```json
 { "error": { "code": "capacity_exhausted", "retry_after_seconds": 3,
              "message": "All compute providers serving this model are busy. Retry shortly." } }
 ```
+
+Chat requests do not give up the instant every node is busy: they wait up to
+**3 seconds** for a slot and proceed as soon as one opens, since jobs typically
+finish in about that time. `capacity_exhausted` means the whole window elapsed
+with nothing free. A model no node serves still fails immediately — waiting
+could not change that answer.
 
 `POST /v1/images/generations` makes the same distinction, returning
 `capacity_exhausted` or `no_image_provider`.

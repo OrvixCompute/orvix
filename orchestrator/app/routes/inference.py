@@ -169,7 +169,7 @@ async def chat_completions(
     # charges the user nor waits on work it cannot use. That wait was real: under
     # a burst, refusals took seconds each while queued behind blocking Supabase
     # calls, to deliver an answer the registry had available immediately.
-    node = node_manager.select_node(body.model, tier)
+    node = await node_manager.acquire_node(body.model, tier)
     if node is None and not settings.ALLOW_MOCK_INFERENCE:
         # Fail loudly rather than hand back a canned answer: a mock reply is
         # indistinguishable from a real one apart from a response header, so

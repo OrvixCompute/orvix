@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -44,6 +45,14 @@ PRIORITY_TIERS = {"gold", "diamond"}
 # couple of seconds, so a short retry usually succeeds where the first attempt
 # lost the race for a slot.
 CAPACITY_RETRY_AFTER_SECONDS = 3
+# How long to wait for a slot before giving up and returning capacity_exhausted,
+# and how often to re-check while waiting. Jobs finish in roughly a second or
+# two, so most bursts that overshoot the concurrency limit clear inside this
+# window — dropping those requests instantly wasted work the network was about
+# to be able to do. Kept short so a genuinely saturated network still fails fast
+# instead of holding connections open.
+CAPACITY_WAIT_SECONDS = 3.0
+CAPACITY_POLL_INTERVAL_S = 0.1
 
 
 class NodeTimeoutError(Exception):
@@ -228,6 +237,36 @@ class NodeManager:
         if user_tier in PRIORITY_TIERS:
             candidates.sort(key=lambda c: c.current_jobs)
         return candidates[0]
+
+    async def acquire_node(
+        self, model: str, user_tier: str, wait_s: float = CAPACITY_WAIT_SECONDS
+    ) -> NodeConnection | None:
+        """`select_node`, but wait briefly for a slot when the network is merely busy.
+
+        A burst that overshoots the concurrency limit used to be dropped on the
+        spot even though the jobs ahead of it finish in a second or two, so
+        requests were refused seconds before the capacity they needed existed.
+
+        Waiting only makes sense when nodes actually serve the model — if none
+        does, this returns immediately rather than making the caller sit through
+        a timeout for an answer that cannot change.
+        """
+        node = self.select_node(model, user_tier)
+        if node is not None or self.unavailable_reason(model) != "at_capacity":
+            return node
+
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(CAPACITY_POLL_INTERVAL_S)
+            node = self.select_node(model, user_tier)
+            if node is not None:
+                logger.debug("Slot for {} freed up while waiting", model)
+                return node
+            # A node dropping out mid-wait turns this into "nothing serves it",
+            # which waiting cannot fix either.
+            if self.unavailable_reason(model) != "at_capacity":
+                return None
+        return None
 
     def served_models(self) -> set[str]:
         """Every model advertised by a currently connected node.
