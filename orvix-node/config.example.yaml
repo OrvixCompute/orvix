@@ -13,7 +13,7 @@ node_secret: "your-node-secret"     # keep private
 # node_id: ""
 
 # --- Connection ---
-orchestrator_url: "wss://api.orvix.xyz"   # local dev: ws://localhost:8000
+orchestrator_url: "wss://orvix.network"   # local dev: ws://localhost:8000
 model: "qwen-2.5-7b"
 
 # --- Runtime ---

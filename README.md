@@ -66,7 +66,7 @@ orvix/
 **For developers (use the API):** create an API key, then call the OpenAI-compatible endpoint.
 
 ```bash
-curl https://api.orvix.network/v1/chat/completions \
+curl https://orvix.network/v1/chat/completions \
   -H "Authorization: Bearer orvx_sk_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{
@@ -78,7 +78,7 @@ curl https://api.orvix.network/v1/chat/completions \
 Image generation works the same way, OpenAI DALL-E-compatible:
 
 ```bash
-curl -X POST https://api.orvix.network/v1/images/generations \
+curl -X POST https://orvix.network/v1/images/generations \
   -H "Authorization: Bearer orvx_sk_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{"model": "orvix-image-1", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'

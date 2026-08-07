@@ -46,7 +46,10 @@ class NodeConfig(BaseModel):
     # explicitly to pin a node to a known id (e.g. when moving hosts).
     node_id: str = ""
 
-    orchestrator_url: str = "wss://api.orvix.network"
+    # The apex host, not an `api.` subdomain: that subdomain has never been
+    # published, so the old default resolved to nothing and every node left on
+    # it failed to connect. `/v1/node/connect` is appended by the client.
+    orchestrator_url: str = "wss://orvix.network"
     model: str = "qwen-2.5-7b"
     inference_endpoint: str = "http://localhost:8000/v1"  # local vLLM, later
     heartbeat_interval: int = 15
@@ -193,7 +196,7 @@ provider_id: ""        # your provider id (from POST /v1/provider/register)
 node_secret: ""        # your node secret (keep this private)
 
 # Connection:
-orchestrator_url: "wss://api.orvix.network"   # use ws://localhost:8000 for local dev
+orchestrator_url: "wss://orvix.network"   # use ws://localhost:8000 for local dev
 model: "qwen-2.5-7b"
 
 # Runtime:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Orvix Node one-line installer (Linux providers; Ubuntu/Debian primary).
-#   curl -sSL https://get.orvix.xyz/node | bash
+#   curl -sSL https://get.orvix.network/node | bash
 set -euo pipefail
 
 ORVIX_DIR="${HOME}/.orvix"
@@ -55,7 +55,7 @@ main() {
     cat > "$CONFIG" <<YAML
 provider_id: "${PROVIDER_ID}"
 node_secret: "${NODE_SECRET}"
-orchestrator_url: "wss://api.orvix.xyz"
+orchestrator_url: "wss://orvix.network"
 model: "qwen-2.5-7b"
 heartbeat_interval: 15
 health_port: 9000
