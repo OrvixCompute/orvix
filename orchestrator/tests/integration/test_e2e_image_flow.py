@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from app.config import settings
+
 from tests.integration.conftest import API_KEY
 
 
@@ -19,7 +21,12 @@ def test_full_image_flow(image_env):
 
     # Response URL + quota headers.
     assert body["data"][0]["url"].endswith(".png")
-    assert resp.headers["X-Orvix-Quota-Remaining"] == "4"  # 5/day holder, used 1
+    # Asserted against the configured allowance rather than a literal: the
+    # number is a pricing policy the operator moves, and this test is about the
+    # header being present and decremented, not about what the limit happens to be.
+    assert resp.headers["X-Orvix-Quota-Remaining"] == str(
+        settings.IMAGE_DAILY_LIMIT_HOLDER - 1
+    )
     assert "X-Orvix-Quota-Reset" in resp.headers
 
     # File written to disk.

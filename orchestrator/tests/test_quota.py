@@ -84,7 +84,11 @@ def test_chat_holder_unlimited():
     assert q["type"] == "holder" and q["free"] is False
 
 
-def test_chat_free_twice_then_402():
+def test_chat_free_up_to_the_limit_then_402(monkeypatch):
+    # Pin the limit here rather than inheriting it: it is a pricing policy the
+    # operator changes, and a test that breaks when policy moves is testing the
+    # wrong thing.
+    monkeypatch.setattr(settings, "CHAT_LIFETIME_FREE_LIMIT", 2)
     db = FakeSupabase()
     q1 = quota_service.enforce_chat_quota(db, "w", False, 0)
     assert q1 == {"type": "free", "remaining": 1, "free": True}
@@ -95,7 +99,8 @@ def test_chat_free_twice_then_402():
     assert exc.value.status_code == 402 and exc.value.error_code == "quota_exceeded"
 
 
-def test_chat_over_free_with_balance_is_paid():
+def test_chat_over_free_with_balance_is_paid(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_LIFETIME_FREE_LIMIT", 2)
     db = FakeSupabase()
     quota_service.enforce_chat_quota(db, "w", False, 0)
     quota_service.enforce_chat_quota(db, "w", False, 0)
@@ -104,8 +109,9 @@ def test_chat_over_free_with_balance_is_paid():
 
 
 # --- image quota -----------------------------------------------------------
-def test_image_grace_fallback_one_per_day(monkeypatch):
+def test_image_grace_fallback_exhausts_then_429(monkeypatch):
     monkeypatch.setattr(settings, "ORVX_MINT_ADDRESS", "")
+    monkeypatch.setattr(settings, "IMAGE_DAILY_LIMIT_FALLBACK", 1)
     db = FakeSupabase()
     q = quota_service.enforce_image_quota(db, "w", False, 0.0, units=1)
     assert q["limit"] == 1 and q["remaining"] == 0
@@ -121,8 +127,9 @@ def test_image_non_holder_403_when_mint_set(monkeypatch):
     assert exc.value.status_code == 403 and exc.value.error_code == "not_holder"
 
 
-def test_image_holder_five_per_day(monkeypatch):
+def test_image_holder_allowance_exhausts_then_429(monkeypatch):
     monkeypatch.setattr(settings, "ORVX_MINT_ADDRESS", "MINT")
+    monkeypatch.setattr(settings, "IMAGE_DAILY_LIMIT_HOLDER", 5)
     db = FakeSupabase()
     for _ in range(5):
         quota_service.enforce_image_quota(db, "w", True, 20000.0, units=1)
@@ -133,6 +140,7 @@ def test_image_holder_five_per_day(monkeypatch):
 
 def test_image_n_consumes_n_units(monkeypatch):
     monkeypatch.setattr(settings, "ORVX_MINT_ADDRESS", "MINT")
+    monkeypatch.setattr(settings, "IMAGE_DAILY_LIMIT_HOLDER", 5)
     db = FakeSupabase()
     q = quota_service.enforce_image_quota(db, "w", True, 20000.0, units=3)
     assert q["remaining"] == 2  # 5 - 3
@@ -142,6 +150,7 @@ def test_image_n_consumes_n_units(monkeypatch):
 
 def test_image_daily_reset_at_utc_rollover(monkeypatch):
     monkeypatch.setattr(settings, "ORVX_MINT_ADDRESS", "")
+    monkeypatch.setattr(settings, "IMAGE_DAILY_LIMIT_FALLBACK", 1)
     db = FakeSupabase()
     monkeypatch.setattr(quota_service, "_today_iso", lambda: "2026-07-02")
     quota_service.enforce_image_quota(db, "w", False, 0.0, units=1)
@@ -155,6 +164,7 @@ def test_image_daily_reset_at_utc_rollover(monkeypatch):
 
 # --- endpoint integration --------------------------------------------------
 def test_chat_endpoint_free_then_402(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_LIFETIME_FREE_LIMIT", 2)
     db = FakeSupabase()
     db.add_user(balance_usdc=0.0)
 

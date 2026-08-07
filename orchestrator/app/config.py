@@ -130,14 +130,21 @@ class Settings(BaseSettings):
     ORVX_HOLDER_THRESHOLD: int = Field(
         10000, description="Minimum ORVX balance to count as a holder"
     )
+    # These three defaults are what a caller gets for free before anything bills
+    # them. They were written when nothing charged, so small numbers were merely
+    # stingy. Chat and images both bill now, which turns a low default into a
+    # deploy that starts taking money after one or two requests.
+    #
+    # They therefore track the operator's actual policy rather than sitting well
+    # below it: a missing .env line should fail generous, not fail charging.
     CHAT_LIFETIME_FREE_LIMIT: int = Field(
-        2, description="Free lifetime chat requests for non-holders"
+        1000, description="Free lifetime chat requests for non-holders"
     )
     IMAGE_DAILY_LIMIT_HOLDER: int = Field(
-        5, description="Daily image generations for holders (resets 00:00 UTC)"
+        50, description="Daily image generations for holders (resets 00:00 UTC)"
     )
     IMAGE_DAILY_LIMIT_FALLBACK: int = Field(
-        1, description="Daily image generations for everyone when ORVX_MINT_ADDRESS is unset"
+        50, description="Daily image generations for everyone when ORVX_MINT_ADDRESS is unset"
     )
     # Priced per 1024x1024 image and scaled by pixel count, because that is what
     # drives the cost: a measured 1024x1024 generation takes ~2.3 s of GPU and
