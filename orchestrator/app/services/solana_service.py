@@ -75,7 +75,19 @@ class SolanaService:
         """Submit a base64-serialized signed transaction; returns the signature."""
         return await self._rpc(
             "sendTransaction",
-            [raw_b64, {"encoding": "base64", "maxRetries": 3}],
+            [
+                raw_b64,
+                {
+                    "encoding": "base64",
+                    "maxRetries": 3,
+                    # Must match the commitment get_latest_blockhash() signs with.
+                    # Preflight simulation defaults to "finalized", which lags a
+                    # "confirmed" blockhash by a slot or two, so the simulating
+                    # node has not seen it yet and rejects the whole transaction
+                    # with BlockhashNotFound — even though it is perfectly valid.
+                    "preflightCommitment": "confirmed",
+                },
+            ],
         )
 
     async def get_signature_status(self, signature: str) -> Optional[str]:
