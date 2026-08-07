@@ -191,3 +191,80 @@ async def test_manual_approval_skipped(db, svc):
     )
     await svc.process_pending_withdrawals()
     assert db._table("withdrawals").rows[0]["status"] == "queued"  # untouched
+
+
+# --- asset guard ------------------------------------------------------------
+#
+# ORVX unstakes are queued into this same `withdrawals` table, and `amount`
+# carries no unit. Before the guard, the only thing keeping an unstake away from
+# a USDC transfer was its manual-approval flag — the very flag an approval step
+# clears. Approving a 25,000 ORVX unstake would then have sent 25,000 USDC.
+
+
+def _unstake_row(db, user, *, manual=True, amount=25000.0):
+    """An ORVX unstake row exactly as StakingService.unstake writes it."""
+    return db._table("withdrawals").insert_row(
+        {
+            "user_id": user["id"],
+            "amount": amount,
+            "destination_wallet": VALID_WALLET,
+            "status": "queued",
+            "metadata": {
+                "asset": "ORVX",
+                "kind": "unstake",
+                "manual_approval_required": manual,
+            },
+        }
+    )
+
+
+async def test_worker_skips_orvx_unstake_even_once_approved(db, svc, monkeypatch):
+    """The dangerous case: an unstake whose manual-approval flag has been cleared."""
+    monkeypatch.setattr(payout_mod.settings, "PAYOUT_STUB", True)
+    user = db.add_user(available_usdc=0.0)
+    _unstake_row(db, user, manual=False)
+
+    sent = []
+    monkeypatch.setattr(svc, "_send_payout", lambda w: sent.append(w))
+
+    await svc.process_pending_withdrawals()
+
+    assert sent == [], "an ORVX row must never reach the USDC send path"
+    row = db._table("withdrawals").rows[0]
+    assert row["status"] == "queued", "the row must be left untouched, not failed"
+
+
+async def test_process_one_refuses_orvx_directly(db, svc, monkeypatch):
+    """Defence in depth: a manual-approval path calling _process_one bypasses
+    the loop filter entirely, so the refusal has to live here too."""
+    monkeypatch.setattr(payout_mod.settings, "PAYOUT_STUB", True)
+    user = db.add_user(available_usdc=0.0)
+    _unstake_row(db, user, manual=True)
+    row = db._table("withdrawals").rows[0]
+
+    sent = []
+    monkeypatch.setattr(svc, "_send_payout", lambda w: sent.append(w))
+
+    await svc._process_one(db, row)
+
+    assert sent == []
+    assert row["status"] == "queued"
+
+
+async def test_usdc_rows_without_an_asset_tag_still_process(db, svc, monkeypatch):
+    """Rows queued before the tag existed carry no `asset` and are all USDC
+    payouts. Defaulting them to anything else would strand real money."""
+    monkeypatch.setattr(payout_mod.settings, "PAYOUT_STUB", True)
+    user = db.add_user(available_usdc=500.0)
+    _queue_row(db, user)  # no "asset" key at all
+
+    await svc.process_pending_withdrawals()
+
+    assert db._table("withdrawals").rows[0]["status"] == "completed"
+
+
+def test_queued_payouts_are_tagged_usdc(db, svc):
+    """New rows say so explicitly rather than relying on the default."""
+    user = db.add_user(available_usdc=500.0)
+    w = svc.queue_withdrawal(user["id"], Decimal("200"), VALID_WALLET)
+    assert w["metadata"]["asset"] == "USDC"

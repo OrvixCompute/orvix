@@ -27,6 +27,17 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _asset_of(withdrawal: dict) -> str:
+    """Which token a withdrawal row is denominated in.
+
+    Rows predating the explicit tag carry no `asset`, and every one of those is
+    a provider USDC payout — unstakes have always tagged themselves ORVX — so an
+    absent value means USDC. Defaulting the other way would strand existing
+    queued payouts instead of protecting anything.
+    """
+    return str((withdrawal.get("metadata") or {}).get("asset") or "USDC").upper()
+
+
 class PayoutService:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
@@ -76,7 +87,9 @@ class PayoutService:
             "amount": float(amount),
             "destination_wallet": destination_wallet,
             "status": "queued",
-            "metadata": {"manual_approval_required": requires_approval},
+            # Tag the asset explicitly rather than leaning on the default: this
+            # table also holds ORVX unstakes, and `amount` carries no unit.
+            "metadata": {"asset": "USDC", "manual_approval_required": requires_approval},
         }
         inserted = db.table("withdrawals").insert(row).execute().data[0]
 
@@ -144,6 +157,13 @@ class PayoutService:
             .execute()
         )
         for w in res.data or []:
+            if _asset_of(w) != "USDC":
+                logger.info(
+                    "Withdrawal {} is a {} payout — not this worker's to send",
+                    w["id"],
+                    _asset_of(w),
+                )
+                continue
             if (w.get("metadata") or {}).get("manual_approval_required"):
                 logger.info("Withdrawal {} awaits manual approval — skipping", w["id"])
                 continue
@@ -153,6 +173,22 @@ class PayoutService:
         wid = w["id"]
         user_id = w["user_id"]
         amount = Decimal(str(w["amount"]))
+
+        # Last line of defence, deliberately here and not only in the loop above.
+        # ORVX unstakes share this `withdrawals` table, and until now the only
+        # thing keeping them away from a USDC transfer was their manual-approval
+        # flag — which is exactly what an approval path would clear. Approving a
+        # 25,000 ORVX unstake would then have sent 25,000 USDC, since the amount
+        # column carries no unit. Refuse by asset, at the point of no return.
+        asset = _asset_of(w)
+        if asset != "USDC":
+            logger.error(
+                "REFUSING withdrawal {}: asset is {}, this worker only sends USDC. "
+                "Row left untouched.",
+                wid,
+                asset,
+            )
+            return
 
         db.table("withdrawals").update({"status": "processing"}).eq("id", wid).execute()
         logger.info("Processing withdrawal {} ({} USDC)", wid, amount)
