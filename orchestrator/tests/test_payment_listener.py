@@ -203,3 +203,164 @@ async def test_process_signature_routes_stake_memo(db, listener, monkeypatch):
     assert float(db._table("users").rows[0]["staked_orvx"]) == pytest.approx(25000.0)
     assert float(db._table("users").rows[0]["balance_usdc"]) == pytest.approx(1000.0)
     assert db._table("staking_intents").rows[0]["status"] == "fulfilled"
+
+
+# --- attribution without a memo --------------------------------------------
+#
+# Before this, a deposit with no memo was logged and abandoned: the money sat in
+# the treasury credited to nobody, and the depositor had no way to tell why.
+# Users log in by signing with a Solana wallet, so a deposit sent from that same
+# wallet identifies itself.
+
+
+def _transfer(*, authority, amount="25", destination="treasury-ata"):
+    return {
+        "amount": amount,
+        "ui_amount": float(amount),
+        "source": "sender-ata",
+        "destination": destination,
+        "authority": authority,
+    }
+
+
+def test_signing_wallet_is_the_authority_not_the_token_account(listener):
+    """`source` is the sender's ATA and matches no user; `authority` is the wallet."""
+    wallet = listener._signing_wallet([_transfer(authority="WalletAbc")])
+    assert wallet == "WalletAbc"
+
+
+def test_signing_wallet_is_none_when_absent(listener):
+    assert listener._signing_wallet([{"amount": "1", "source": "x"}]) is None
+    assert listener._signing_wallet([]) is None
+
+
+def test_user_lookup_by_wallet(db, listener):
+    user = db.add_user(balance_usdc=0.0)
+    wallet = user["wallet_address"]
+    assert listener._user_id_for_wallet(db, wallet) == user["id"]
+    assert listener._user_id_for_wallet(db, "NobodysWallet") is None
+
+
+async def test_credit_without_an_intent_still_credits(db, listener):
+    """The fallback path has no intent to point at; the ledger row takes a null."""
+    user = db.add_user(balance_usdc=10.0)
+
+    ok = await listener._credit(
+        db, user["id"], "sig-no-memo", Decimal("25"), memo=None, intent=None
+    )
+
+    assert ok is True
+    assert float(db._table("users").rows[0]["balance_usdc"]) == pytest.approx(35.0)
+    tx = db._table("transactions").rows[0]
+    assert tx["type"] == "topup"
+    assert tx["solana_signature"] == "sig-no-memo"
+
+
+async def test_credit_is_idempotent_without_an_intent(db, listener):
+    """The signature constraint is the guard, not the intent."""
+    user = db.add_user(balance_usdc=10.0)
+
+    first = await listener._credit(
+        db, user["id"], "sig-dup", Decimal("25"), memo=None, intent=None
+    )
+    second = await listener._credit(
+        db, user["id"], "sig-dup", Decimal("25"), memo=None, intent=None
+    )
+
+    assert first is True
+    assert second is False, "a re-run must credit nothing"
+    assert float(db._table("users").rows[0]["balance_usdc"]) == pytest.approx(35.0)
+
+
+# --- _process_signature routing --------------------------------------------
+
+
+class _FakeSol:
+    """Stands in for the shared Solana client for one signature."""
+
+    def __init__(self, memo, transfers):
+        self._memo = memo
+        self._transfers = transfers
+
+    async def get_parsed_transaction(self, signature):
+        return {"transaction": {"message": {"instructions": []}}, "meta": {}}
+
+    def extract_memo(self, parsed):
+        return self._memo
+
+    def extract_spl_transfers(self, parsed, mint, owner):
+        return self._transfers
+
+
+@pytest.fixture
+def wired(db, listener, monkeypatch):
+    """Point the listener at the fake db and a stubbed chain."""
+    import app.services.payment_listener as pl
+
+    monkeypatch.setattr(pl, "get_supabase", lambda: db)
+    monkeypatch.setattr(pl.settings, "USDC_MINT_ADDRESS", "UsdcMint111")
+    monkeypatch.setattr(pl.settings, "TREASURY_WALLET_ADDRESS", "TreasuryWallet")
+
+    def _wire(memo, transfers):
+        monkeypatch.setattr(pl, "get_solana_service", lambda: _FakeSol(memo, transfers))
+        # Matches the destination used by _transfer().
+        listener._treasury_token_accounts = {"treasury-ata"}
+
+    return _wire
+
+
+async def test_deposit_without_a_memo_is_credited_to_the_sending_wallet(db, listener, wired):
+    """The behaviour that was missing: no memo, money still lands."""
+    user = db.add_user(balance_usdc=5.0)
+    wired(None, [_transfer(authority=user["wallet_address"], amount="25")])
+
+    await listener._process_signature("sig-sender-match")
+
+    assert float(db._table("users").rows[0]["balance_usdc"]) == pytest.approx(30.0)
+
+
+async def test_expired_intent_falls_back_to_the_sending_wallet(db, listener, wired):
+    """A memo whose 30-minute intent lapsed must not cost the depositor their money."""
+    user = db.add_user(balance_usdc=5.0)
+    db._table("topup_intents").insert_row(
+        {
+            "user_id": user["id"],
+            "memo": "orvx_expired",
+            "status": "pending",
+            "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        }
+    )
+    wired("orvx_expired", [_transfer(authority=user["wallet_address"], amount="25")])
+
+    await listener._process_signature("sig-expired-intent")
+
+    assert float(db._table("users").rows[0]["balance_usdc"]) == pytest.approx(30.0)
+
+
+async def test_memo_wins_over_the_sending_wallet(db, listener, wired):
+    """An exchange withdrawal is signed by the exchange, so the memo must lead.
+
+    Here the memo names one user and the signer is a different one; the memo's
+    owner is the one credited.
+    """
+    payer = db.add_user(balance_usdc=0.0)
+    signer = db.add_user(balance_usdc=0.0)
+    _make_intent(db, payer)
+    wired("orvx_abc123def456", [_transfer(authority=signer["wallet_address"], amount="25")])
+
+    await listener._process_signature("sig-memo-wins")
+
+    balances = {r["id"]: float(r["balance_usdc"]) for r in db._table("users").rows}
+    assert balances[payer["id"]] == pytest.approx(25.0)
+    assert balances[signer["id"]] == pytest.approx(0.0)
+
+
+async def test_unknown_sender_without_a_memo_credits_nobody(db, listener, wired):
+    """Still refuse to guess. An unattributable deposit must not land on someone."""
+    db.add_user(balance_usdc=5.0)
+    wired(None, [_transfer(authority="SomeStrangersWallet", amount="25")])
+
+    await listener._process_signature("sig-stranger")
+
+    assert float(db._table("users").rows[0]["balance_usdc"]) == pytest.approx(5.0)
+    assert db._table("transactions").rows == []
