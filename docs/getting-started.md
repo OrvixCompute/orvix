@@ -18,7 +18,7 @@ You talk to Orvix through an OpenAI-compatible endpoint, so most existing
 OpenAI client libraries work by just changing the base URL and API key.
 
 ```bash
-curl https://api.orvix.network/v1/chat/completions \
+curl https://orvix.network/v1/chat/completions \
   -H "Authorization: Bearer orvx_sk_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{

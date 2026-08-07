@@ -30,7 +30,7 @@ authentication:
 Get a challenge string to sign with your Solana wallet. No auth required.
 
 ```bash
-curl "https://api.orvix.network/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
+curl "https://orvix.network/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
 ```
 
 ```json
@@ -41,7 +41,7 @@ curl "https://api.orvix.network/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
 Verify the signed challenge and receive a JWT. No auth required.
 
 ```bash
-curl -X POST https://api.orvix.network/v1/auth/verify \
+curl -X POST https://orvix.network/v1/auth/verify \
   -H "Content-Type: application/json" \
   -d '{ "wallet": "YOUR_WALLET_ADDRESS", "signature": "BASE58_SIGNATURE" }'
 ```
@@ -54,7 +54,7 @@ curl -X POST https://api.orvix.network/v1/auth/verify \
 Return the current authenticated user. **Auth: JWT.**
 
 ```bash
-curl -X POST https://api.orvix.network/v1/auth/me \
+curl -X POST https://orvix.network/v1/auth/me \
   -H "Authorization: Bearer <JWT>"
 ```
 
@@ -68,7 +68,7 @@ All require **Auth: JWT.**
 Create a new API key. The full key is returned **once** — store it securely.
 
 ```bash
-curl -X POST https://api.orvix.network/v1/api-keys \
+curl -X POST https://orvix.network/v1/api-keys \
   -H "Authorization: Bearer <JWT>" \
   -H "Content-Type: application/json" \
   -d '{ "name": "my-app" }'
@@ -95,7 +95,7 @@ Revoke the old secret and issue a new one for the same key record.
 Run a chat completion. **Auth: API key.**
 
 ```bash
-curl https://api.orvix.network/v1/chat/completions \
+curl https://orvix.network/v1/chat/completions \
   -H "Authorization: Bearer orvx_sk_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{
@@ -241,7 +241,7 @@ default 24h); the `*_total` counters are all-time. Mock jobs are excluded, so
 the numbers reflect work that real nodes actually served.
 
 ```bash
-curl https://api.orvix.network/v1/network/stats
+curl https://orvix.network/v1/network/stats
 ```
 
 ```json
@@ -364,7 +364,7 @@ API root / version info. No auth required.
 Bearer orvx_sk_...`.
 
 ```bash
-curl -X POST https://api.orvix.network/v1/images/generations \
+curl -X POST https://orvix.network/v1/images/generations \
   -H "Authorization: Bearer orvx_sk_..." \
   -H "Content-Type: application/json" \
   -d '{"model": "orvix-image-1", "prompt": "a fox in snow", "size": "1024x1024", "n": 1}'
