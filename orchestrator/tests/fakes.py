@@ -16,6 +16,25 @@ class _Result:
         self.count = count
 
 
+# Column defaults Postgres fills in that the app therefore never sends. Without
+# these an app-path insert produces a row missing columns the app later reads —
+# e.g. POST /v1/auth/verify inserts a user with only wallet_address, and reading
+# it back raised KeyError('tier') here while working fine against the real
+# schema. Mirrors migrations 001 (users) + 003/006 (provider/staking columns).
+_COLUMN_DEFAULTS: dict[str, dict] = {
+    "users": {
+        "tier": "bronze",
+        "balance_usdc": 0.0,
+        "is_active": True,
+        "is_provider": False,
+        "available_usdc": 0.0,
+        "pending_withdrawal_usdc": 0.0,
+        "lifetime_earnings_usdc": 0.0,
+        "staked_orvx": 0.0,
+    },
+}
+
+
 class FakeTable:
     def __init__(self, name: str):
         self.name = name
@@ -25,6 +44,8 @@ class FakeTable:
         r = dict(row)
         r.setdefault("id", str(uuid.uuid4()))
         r.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+        for column, value in _COLUMN_DEFAULTS.get(self.name, {}).items():
+            r.setdefault(column, value)
         self.rows.append(r)
         return r
 

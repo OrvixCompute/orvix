@@ -37,6 +37,11 @@ curl "https://orvix.network/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
 { "challenge": "Sign this message to authenticate with Orvix: <nonce>" }
 ```
 
+Challenges are stored server-side, valid for **5 minutes**, and **single-use** —
+verifying one consumes it. A wallet may hold **several outstanding at once**, so
+requesting a new challenge does not invalidate one the user is still signing, and
+a restart of the orchestrator does not drop challenges that are already issued.
+
 ### `POST /v1/auth/verify`
 Verify the signed challenge and receive a JWT. No auth required.
 

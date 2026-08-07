@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from solders.pubkey import Pubkey
 from solders.signature import Signature
+from supabase import Client
 
 from app.config import settings
 from app.exceptions import UnauthorizedError, ValidationError
@@ -21,19 +22,26 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class AuthService:
-    """Stateless except for an in-memory nonce store.
+def _parse_ts(value) -> datetime:
+    """Parse a timestamptz coming back from PostgREST into an aware datetime."""
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
-    TODO: move `_nonces` to Redis so challenges survive restarts and work across
-    multiple orchestrator instances.
+
+class AuthService:
+    """Stateless — challenges live in the `auth_challenges` table.
+
+    They used to sit in an in-memory dict, which lost every pending challenge on
+    restart and, being keyed by wallet, let a second /challenge call silently
+    invalidate the first. Both surfaced to users as the same opaque 401. See
+    migration 017.
     """
 
-    def __init__(self) -> None:
-        # wallet -> {"nonce": str, "expires_at": datetime}
-        self._nonces: dict[str, dict] = {}
-
     # --- Challenge ---------------------------------------------------------
-    def create_challenge(self, wallet: str) -> dict:
+    def create_challenge(self, db: Client, wallet: str) -> dict:
         """Generate a nonce + message for the wallet to sign."""
         self._validate_wallet(wallet)
 
@@ -46,12 +54,26 @@ class AuthService:
             f"Timestamp: {issued.isoformat()}"
         )
 
-        self._nonces[wallet] = {"nonce": nonce, "expires_at": expires_at}
+        # Opportunistic sweep: expired rows are dead weight and nothing else
+        # deletes them. Bounded by the index on expires_at and best-effort — a
+        # failed cleanup must never stop a user from logging in.
+        try:
+            db.table("auth_challenges").delete().lt("expires_at", _now().isoformat()).execute()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Expired-challenge sweep failed: {}", exc)
+
+        db.table("auth_challenges").insert(
+            {
+                "nonce": nonce,
+                "wallet": wallet,
+                "expires_at": expires_at.isoformat(),
+            }
+        ).execute()
         logger.debug("Issued challenge for {} (nonce={})", wallet, nonce)
         return {"message": message, "nonce": nonce, "expires_at": expires_at}
 
     # --- Verification ------------------------------------------------------
-    def verify_signature(self, wallet: str, message: str, signature: str) -> None:
+    def verify_signature(self, db: Client, wallet: str, message: str, signature: str) -> None:
         """Validate message format, nonce, freshness, and the ed25519 signature.
 
         Raises UnauthorizedError / ValidationError on any failure. On success the
@@ -65,12 +87,22 @@ class AuthService:
         nonce = self._extract_field(message, "Nonce")
         timestamp_str = self._extract_field(message, "Timestamp")
 
-        # Confirm the nonce matches the one we issued and has not expired.
-        stored = self._nonces.get(wallet)
-        if not stored or stored["nonce"] != nonce:
+        # Look the challenge up by its nonce, then confirm it was issued to this
+        # wallet. Looking up by wallet instead would mean only the newest
+        # challenge is ever valid, which is exactly the bug migration 017 fixes.
+        found = (
+            db.table("auth_challenges")
+            .select("*")
+            .eq("nonce", nonce)
+            .limit(1)
+            .execute()
+            .data
+        )
+        stored = found[0] if found else None
+        if not stored or stored["wallet"] != wallet:
             raise UnauthorizedError("Unknown or already-used challenge nonce")
-        if _now() > stored["expires_at"]:
-            self._nonces.pop(wallet, None)
+        if _now() > _parse_ts(stored["expires_at"]):
+            db.table("auth_challenges").delete().eq("nonce", nonce).execute()
             raise UnauthorizedError("Challenge has expired")
 
         # Reject stale messages even if the nonce somehow lingers.
@@ -88,7 +120,7 @@ class AuthService:
             raise UnauthorizedError("Signature verification failed")
 
         # One-time use — consume the nonce.
-        self._nonces.pop(wallet, None)
+        db.table("auth_challenges").delete().eq("nonce", nonce).execute()
         logger.info("Signature verified for wallet {}", wallet)
 
     # --- JWT ---------------------------------------------------------------
@@ -138,5 +170,6 @@ class AuthService:
             return False
 
 
-# Module-level singleton so the in-memory nonce store is shared.
+# Module-level singleton. Holds no state now that challenges are in the database;
+# kept as a singleton so callers keep the same import path.
 auth_service = AuthService()
