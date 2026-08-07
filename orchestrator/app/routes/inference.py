@@ -42,7 +42,11 @@ from app.models.protocol import JobMessage
 from app.services import inference_service, quota_service, tier_service
 from app.services.billing_service import BillingService
 from app.services.holder import holder_service
-from app.services.node_manager import NodeTimeoutError, node_manager
+from app.services.node_manager import (
+    CAPACITY_RETRY_AFTER_SECONDS,
+    NodeTimeoutError,
+    node_manager,
+)
 
 router = APIRouter(prefix="/v1", tags=["inference"])
 
@@ -158,26 +162,43 @@ async def chat_completions(
             error_code="streaming_tools_unsupported",
         )
 
-    prompt_tokens = inference_service.estimate_prompt_tokens(body.messages)
-    billing = BillingService(db)
-    current_balance = Decimal(billing.get_balance(user["id"])["balance_usdc"])
-
-    # Pick the node BEFORE the quota gate. Selection is a read of the in-memory
-    # registry with no side effects, while the quota gate consumes a free-tier
-    # request — so checking availability first means a user is never charged a
-    # request the network could not have served anyway.
-    node = node_manager.select_node(body.model, tier)
+    # Pick the node BEFORE the quota gate AND before any billing I/O. Selection
+    # is a read of the in-memory registry with no side effects, while the quota
+    # gate consumes a free-tier request and the balance lookup costs a database
+    # round trip — so checking availability first means a refused request neither
+    # charges the user nor waits on work it cannot use. That wait was real: under
+    # a burst, refusals took seconds each while queued behind blocking Supabase
+    # calls, to deliver an answer the registry had available immediately.
+    node = await node_manager.acquire_node(body.model, tier)
     if node is None and not settings.ALLOW_MOCK_INFERENCE:
         # Fail loudly rather than hand back a canned answer: a mock reply is
         # indistinguishable from a real one apart from a response header, so
         # serving it to real users misrepresents the network as working. This
         # mirrors what /v1/images/generations already does.
-        logger.warning("No nodes available for {} — refusing the request", body.model)
+        #
+        # Separate the two reasons: "everyone is busy" is transient and worth a
+        # retry, "nobody serves this model" is not. Collapsing them into one
+        # message told users no providers existed while providers were in fact
+        # working, and hid from operators which of the two they had to fix —
+        # more capacity, or a node that loads the model.
+        reason = node_manager.unavailable_reason(body.model)
+        logger.warning("No node for {} ({}) — refusing the request", body.model, reason)
+        if reason == "at_capacity":
+            raise OrvixException(
+                "All compute providers serving this model are busy. Retry shortly.",
+                error_code="capacity_exhausted",
+                status_code=503,
+                details={"retry_after_seconds": CAPACITY_RETRY_AFTER_SECONDS},
+            )
         raise OrvixException(
             "No compute providers are currently available",
             error_code="no_chat_provider",
             status_code=503,
         )
+
+    prompt_tokens = inference_service.estimate_prompt_tokens(body.messages)
+    billing = BillingService(db)
+    current_balance = Decimal(billing.get_balance(user["id"])["balance_usdc"])
 
     # Quota gate: holders are unlimited; non-holders get CHAT_LIFETIME_FREE_LIMIT
     # free requests (not billed), then must pay (balance) or are blocked (402).

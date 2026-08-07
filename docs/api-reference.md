@@ -37,6 +37,11 @@ curl "https://orvix.network/v1/auth/challenge?wallet=YOUR_WALLET_ADDRESS"
 { "challenge": "Sign this message to authenticate with Orvix: <nonce>" }
 ```
 
+Challenges are stored server-side, valid for **5 minutes**, and **single-use** —
+verifying one consumes it. A wallet may hold **several outstanding at once**, so
+requesting a new challenge does not invalidate one the user is still signing, and
+a restart of the orchestrator does not drop challenges that are already issued.
+
 ### `POST /v1/auth/verify`
 Verify the signed challenge and receive a JWT. No auth required.
 
@@ -131,10 +136,53 @@ reassembled, which is not implemented yet — refusing is preferred over streami
 the prose and silently dropping the calls.
 
 > Responses come from a real GPU node running the model. If no node can take the
-> job the request returns `503 no_chat_provider` rather than a placeholder — the
-> API never returns a fabricated answer. (A local `ALLOW_MOCK_INFERENCE` flag
-> serves a canned reply for development against an empty network; it is off by
-> default and must stay off anywhere real users can reach.)
+> job the request returns 503 rather than a placeholder — the API never returns a
+> fabricated answer. (A local `ALLOW_MOCK_INFERENCE` flag serves a canned reply
+> for development against an empty network; it is off by default and must stay
+> off anywhere real users can reach.)
+
+Two different 503s, because they call for different responses:
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `capacity_exhausted` | Nodes serve this model but every one stayed busy for the whole wait | Retry — the body carries `retry_after_seconds` |
+| `no_chat_provider` | No node on the network serves this model at all | Retrying will not help; pick a model from `/v1/models` that a node is actually running |
+
+```json
+{ "error": { "code": "capacity_exhausted", "retry_after_seconds": 3,
+             "message": "All compute providers serving this model are busy. Retry shortly." } }
+```
+
+Chat requests do not give up the instant every node is busy: they wait up to
+**3 seconds** for a slot and proceed as soon as one opens, since jobs typically
+finish in about that time. `capacity_exhausted` means the whole window elapsed
+with nothing free. A model no node serves still fails immediately — waiting
+could not change that answer.
+
+`POST /v1/images/generations` makes the same distinction, returning
+`capacity_exhausted` or `no_image_provider`.
+
+---
+
+## Models
+
+### `GET /v1/models`
+OpenAI-compatible model catalog. No auth required.
+
+Each entry carries an Orvix-specific **`available`** flag: `true` when a
+currently connected node runs that model, `false` when it is only in the
+catalog. Requesting an unavailable model returns `503 no_chat_provider` /
+`no_image_provider`, so check this first rather than discovering it from the
+error. Extra fields are ignored by OpenAI clients.
+
+```json
+{ "object": "list", "data": [
+  { "id": "qwen-2.5-7b", "object": "model", "owned_by": "orvix",
+    "type": "chat", "available": true, "context_window": 32768 },
+  { "id": "mistral-7b", "object": "model", "owned_by": "orvix",
+    "type": "chat", "available": false, "context_window": 32768 }
+] }
+```
 
 ---
 
@@ -263,16 +311,22 @@ curl https://orvix.network/v1/network/stats
     "avg_latency_ms": 1000
   },
   "images": { "generated_total": 2, "generated_window": 1 },
-  "models": { "chat": 3, "image": 2 },
+  "models": { "chat": 3, "image": 2, "chat_available": 1, "image_available": 1 },
   "generated_at": "2026-07-26T10:00:00Z"
 }
 ```
 
-`nodes.online` is the number of nodes holding a live websocket connection right
-now and is read fresh on every call. Everything else is a database aggregate
-cached for `NETWORK_STATS_CACHE_SECONDS` (default 30), so `generated_at` is the
-snapshot time rather than the request time. `avg_latency_ms` is `null` when
-there were no requests in the window.
+Anything the live websocket registry can answer is read fresh on every call:
+`nodes.online`, the per-status counts (`ready`/`busy`/`draining`/`offline`), and
+`models.*_available`. The rest — registration totals, GPU breakdown, job and
+token volume — is a database aggregate cached for `NETWORK_STATS_CACHE_SECONDS`
+(default 30), so `generated_at` is the snapshot time rather than the request
+time. `avg_latency_ms` is `null` when there were no requests in the window.
+
+`models.chat`/`models.image` count the **catalog**; `chat_available` and
+`image_available` count what a connected node is actually running. The two differ
+whenever the catalog offers a model nobody serves, which is the case a client
+needs to see before it picks one.
 
 For the token/treasury side of the dashboard, see
 [`GET /v1/staking/network-stats`](#get-v1stakingnetwork-stats).

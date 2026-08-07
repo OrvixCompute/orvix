@@ -281,3 +281,63 @@ async def test_settle_job_credits_provider(monkeypatch):
     assert earning == Decimal("0.700000000")  # 70% reward
     assert float(db._table("users").rows[0]["available_usdc"]) == pytest.approx(0.7)
     assert db._table("nodes").rows[0]["total_jobs"] == 1
+
+
+# --- waiting for a slot instead of dropping the request --------------------
+def _saturated_manager(model="qwen-2.5-7b"):
+    """A manager whose only node serves `model` and has no free slot."""
+    manager = NodeManager()
+    node = _conn("node-1", model=model, current_jobs=1, max_jobs=1)
+    manager.connected_nodes[node.node_id] = node
+    return manager, node
+
+
+async def test_acquire_waits_for_a_slot_to_free_up():
+    """A burst that overshoots concurrency should not be dropped on the spot.
+
+    Jobs finish in a second or two, so refusing instantly threw away requests
+    seconds before the capacity they needed existed.
+    """
+    manager, node = _saturated_manager()
+
+    async def free_the_slot():
+        await asyncio.sleep(0.15)
+        node.current_jobs = 0
+
+    asyncio.get_running_loop().create_task(free_the_slot())
+    picked = await manager.acquire_node("qwen-2.5-7b", "bronze", wait_s=2.0)
+
+    assert picked is node
+
+
+async def test_acquire_does_not_wait_when_no_node_serves_the_model():
+    """Waiting cannot conjure a model nobody runs, so it must return at once."""
+    manager, _node = _saturated_manager()
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    picked = await manager.acquire_node("mistral-7b", "bronze", wait_s=5.0)
+    elapsed = loop.time() - started
+
+    assert picked is None
+    assert elapsed < 0.5, f"waited {elapsed:.2f}s for a model nothing serves"
+
+
+async def test_acquire_gives_up_after_the_window():
+    manager, _node = _saturated_manager()  # slot never frees
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    picked = await manager.acquire_node("qwen-2.5-7b", "bronze", wait_s=0.3)
+    elapsed = loop.time() - started
+
+    assert picked is None
+    assert 0.25 <= elapsed < 1.5, f"gave up after {elapsed:.2f}s"
+
+
+async def test_acquire_returns_immediately_when_a_slot_is_free():
+    manager = NodeManager()
+    node = _conn("node-1", current_jobs=0, max_jobs=4)
+    manager.connected_nodes[node.node_id] = node
+
+    assert await manager.acquire_node("qwen-2.5-7b", "bronze", wait_s=5.0) is node

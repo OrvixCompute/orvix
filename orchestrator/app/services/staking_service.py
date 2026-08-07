@@ -28,6 +28,11 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _decimal_str(value) -> str:
+    """Render a numeric column as a plain decimal string, never scientific notation."""
+    return format(Decimal(str(value or 0)), "f")
+
+
 class StakingService:
     def __init__(self, db: Client) -> None:
         self.db = db
@@ -220,10 +225,14 @@ class StakingService:
         return {
             "total_staked": format(total_staked, "f"),
             "total_providers": providers.count or 0,
-            "buyback_budget_usdc": str(acct.get("buyback_budget_usdc", 0) or 0),
-            "orvx_held_for_burn": str(acct.get("orvx_held_for_burn", 0) or 0),
-            "total_orvx_burned": str(acct.get("total_orvx_burned", 0) or 0),
-            "total_orvx_bought": str(acct.get("total_orvx_bought", 0) or 0),
+            # Plain str() on a small float renders scientific notation ("8e-06"),
+            # which leaked to this public endpoint and reads as garbage to any
+            # client that displays the string as-is. format(…, "f") matches how
+            # total_staked above is already rendered.
+            "buyback_budget_usdc": _decimal_str(acct.get("buyback_budget_usdc")),
+            "orvx_held_for_burn": _decimal_str(acct.get("orvx_held_for_burn")),
+            "total_orvx_burned": _decimal_str(acct.get("total_orvx_burned")),
+            "total_orvx_bought": _decimal_str(acct.get("total_orvx_bought")),
             "last_buyback_at": last_buyback[0]["created_at"] if last_buyback else None,
             "last_burn_at": last_burn[0]["created_at"] if last_burn else None,
         }

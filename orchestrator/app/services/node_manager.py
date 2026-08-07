@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -40,6 +41,18 @@ HEARTBEAT_STALE_S = 60.0
 HEALTH_CHECK_INTERVAL_S = 30.0
 # Tiers that get preferential (least-loaded) node selection.
 PRIORITY_TIERS = {"gold", "diamond"}
+# Retry hint sent with capacity_exhausted. Jobs on a saturated node finish in a
+# couple of seconds, so a short retry usually succeeds where the first attempt
+# lost the race for a slot.
+CAPACITY_RETRY_AFTER_SECONDS = 3
+# How long to wait for a slot before giving up and returning capacity_exhausted,
+# and how often to re-check while waiting. Jobs finish in roughly a second or
+# two, so most bursts that overshoot the concurrency limit clear inside this
+# window — dropping those requests instantly wasted work the network was about
+# to be able to do. Kept short so a genuinely saturated network still fails fast
+# instead of holding connections open.
+CAPACITY_WAIT_SECONDS = 3.0
+CAPACITY_POLL_INTERVAL_S = 0.1
 
 
 class NodeTimeoutError(Exception):
@@ -224,6 +237,64 @@ class NodeManager:
         if user_tier in PRIORITY_TIERS:
             candidates.sort(key=lambda c: c.current_jobs)
         return candidates[0]
+
+    async def acquire_node(
+        self, model: str, user_tier: str, wait_s: float = CAPACITY_WAIT_SECONDS
+    ) -> NodeConnection | None:
+        """`select_node`, but wait briefly for a slot when the network is merely busy.
+
+        A burst that overshoots the concurrency limit used to be dropped on the
+        spot even though the jobs ahead of it finish in a second or two, so
+        requests were refused seconds before the capacity they needed existed.
+
+        Waiting only makes sense when nodes actually serve the model — if none
+        does, this returns immediately rather than making the caller sit through
+        a timeout for an answer that cannot change.
+        """
+        node = self.select_node(model, user_tier)
+        if node is not None or self.unavailable_reason(model) != "at_capacity":
+            return node
+
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(CAPACITY_POLL_INTERVAL_S)
+            node = self.select_node(model, user_tier)
+            if node is not None:
+                logger.debug("Slot for {} freed up while waiting", model)
+                return node
+            # A node dropping out mid-wait turns this into "nothing serves it",
+            # which waiting cannot fix either.
+            if self.unavailable_reason(model) != "at_capacity":
+                return None
+        return None
+
+    def served_models(self) -> set[str]:
+        """Every model advertised by a currently connected node.
+
+        Membership means "a node on the network runs this", not "a slot is free
+        right now" — a busy node still serves its models, and capacity is
+        transient. Callers wanting the momentary answer use select_node.
+        """
+        return {m for c in self.connected_nodes.values() for m in c.models_supported}
+
+    def unavailable_reason(self, model: str, engine: str | None = None) -> str:
+        """Why `select_node`/`select_image_node` came back empty.
+
+        Returns ``"at_capacity"`` when nodes serve the model but are all busy or
+        draining, and ``"no_node"`` when nothing on the network serves it at all.
+        These need different answers: at capacity the caller should retry shortly,
+        while no_node means retrying will never help until a node loads the model.
+
+        Diagnostic only — it re-reads the registry, so a node can free up between
+        the failed selection and this call. The worst case is a slightly stale
+        reason on an error path, never a wrong routing decision.
+        """
+        serving = [
+            c
+            for c in self.connected_nodes.values()
+            if model in c.models_supported and (engine is None or engine in c.engines)
+        ]
+        return "at_capacity" if serving else "no_node"
 
     def select_image_node(self, model: str) -> NodeConnection | None:
         """Pick a ready node that advertises the image engine and serves `model`."""

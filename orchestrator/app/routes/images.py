@@ -38,7 +38,11 @@ from app.models.inference import IMAGE_MODELS, image_model_max_size
 from app.models.protocol import ImageJobDispatchMessage
 from app.services import quota_service, storage_service
 from app.services.holder import holder_service
-from app.services.node_manager import NodeTimeoutError, node_manager
+from app.services.node_manager import (
+    CAPACITY_RETRY_AFTER_SECONDS,
+    NodeTimeoutError,
+    node_manager,
+)
 
 router = APIRouter(prefix="/v1", tags=["images"])
 
@@ -127,6 +131,16 @@ async def images_generations(
     if node is None:
         # No node ever ran — refund the units we just consumed.
         quota_service.refund_image_quota(db, user["wallet_address"], body.n)
+        # Same split as chat: busy-but-present is transient and worth retrying,
+        # nothing-serves-this-model is not.
+        reason = node_manager.unavailable_reason(body.model, engine="image")
+        if reason == "at_capacity":
+            raise OrvixException(
+                "All image providers serving this model are busy. Retry shortly.",
+                error_code="capacity_exhausted",
+                status_code=503,
+                details={"retry_after_seconds": CAPACITY_RETRY_AFTER_SECONDS},
+            )
         raise OrvixException(
             "No image providers are currently available",
             error_code="no_image_provider",

@@ -6,8 +6,10 @@ trip instead of pulling every jobs row into the process.
 
 That snapshot is cached for ``NETWORK_STATS_CACHE_SECONDS`` because the endpoint
 is public and unauthenticated — without it every dashboard page load would hit
-the database. The live node count is *not* cached: it comes from the in-memory
-websocket registry and is free to read, so it stays accurate to the second.
+the database. Anything the in-memory websocket registry can answer (connection
+counts, per-status counts, which models are actually being served) is read live
+instead: it is free, and mixing a live field into otherwise stale counts is what
+made the response contradict itself when a node reconnected mid-window.
 """
 
 import time
@@ -89,8 +91,30 @@ def get_stats(db: Client) -> dict:
         _cache = (now, snapshot)
 
     # Copy before mutating: the cached dict is reused across requests.
-    out = {**snapshot, "nodes": {**snapshot["nodes"]}}
-    out["nodes"]["online"] = len(node_manager.connected_nodes)
+    out = {**snapshot, "nodes": {**snapshot["nodes"]}, "models": {**snapshot["models"]}}
+
+    # Everything the live registry can answer is taken from the live registry,
+    # not the cached snapshot. Overlaying only `online` used to publish
+    # impossible combinations — online=1 alongside ready=0 and offline=1 — when
+    # a node reconnected inside the cache window. Registered totals still come
+    # from the database, since rows outlive connections.
+    conns = list(node_manager.connected_nodes.values())
+    statuses = [c.status for c in conns]
+    registered = out["nodes"].get("registered", 0)
+    out["nodes"]["online"] = len(conns)
+    out["nodes"]["ready"] = statuses.count("ready")
+    out["nodes"]["busy"] = statuses.count("busy")
+    out["nodes"]["draining"] = statuses.count("draining")
+    # A node is offline exactly when it has a row but no live connection.
+    out["nodes"]["offline"] = max(registered - len(conns), 0)
+
+    served = node_manager.served_models()
+    out["models"]["chat_available"] = sum(
+        1 for m in MODEL_CATALOG if m["type"] == "chat" and m["id"] in served
+    )
+    out["models"]["image_available"] = sum(
+        1 for m in MODEL_CATALOG if m["type"] == "image" and m["id"] in served
+    )
     return out
 
 

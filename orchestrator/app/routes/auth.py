@@ -17,15 +17,18 @@ router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 
 @router.get("/challenge", response_model=ChallengeResponse)
-async def challenge(wallet: str = Query(..., description="Solana wallet address")):
+async def challenge(
+    wallet: str = Query(..., description="Solana wallet address"),
+    db: Client = Depends(get_supabase),
+):
     """Issue a nonce + message for the wallet to sign."""
-    return auth_service.create_challenge(wallet)
+    return auth_service.create_challenge(db, wallet)
 
 
 @router.post("/verify", response_model=VerifyResponse)
 async def verify(body: VerifyRequest, db: Client = Depends(get_supabase)):
     """Verify a signed challenge, upsert the user, and return a JWT."""
-    auth_service.verify_signature(body.wallet, body.message, body.signature)
+    auth_service.verify_signature(db, body.wallet, body.message, body.signature)
 
     # Upsert the user by wallet_address.
     existing = (

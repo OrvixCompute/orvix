@@ -594,3 +594,108 @@ def test_dispatched_messages_carry_no_null_tool_fields(client_and_db, monkeypatc
     sent = seen["job"].messages[0]
     assert sent == {"role": "user", "content": "hi"}
     assert all(v is not None for v in sent.values())
+
+
+# --- capacity vs. nothing-serves-this-model --------------------------------
+def _busy_node(provider_id: str, model: str = "qwen-2.5-7b"):
+    """A connected node that serves `model` but has no free slot."""
+    from app.services.node_manager import NodeConnection
+
+    return NodeConnection(
+        node_id="node-busy",
+        provider_id=provider_id,
+        websocket=None,
+        model=model,
+        gpu_info={},
+        max_concurrent_jobs=1,
+        status="busy",
+        current_jobs=1,
+        models_supported=[model],
+        engines=["chat", "image"],
+    )
+
+
+def test_busy_nodes_report_capacity_not_absence(client_and_db, monkeypatch):
+    """A saturated node must not be reported as "no providers available".
+
+    Telling a user no provider exists while providers are in fact serving jobs
+    is wrong in a way that matters: capacity is transient and worth retrying,
+    an unserved model is not.
+    """
+    from app.config import settings
+    from app.services import node_manager as nm_mod
+
+    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
+    client, db = client_and_db
+    _make_user(db)
+    provider = db.add_user()
+    monkeypatch.setitem(
+        nm_mod.node_manager.connected_nodes, "node-busy", _busy_node(provider["id"])
+    )
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 503
+    body = resp.json()["error"]
+    assert body["code"] == "capacity_exhausted"
+    # details are merged into the error body, matching RateLimitError's shape.
+    assert body["retry_after_seconds"] > 0
+    assert db._table("jobs").rows == []
+
+
+def test_unserved_model_still_reports_absence(client_and_db, monkeypatch):
+    """A node that serves a *different* model must not be read as capacity."""
+    from app.config import settings
+    from app.services import node_manager as nm_mod
+
+    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
+    client, db = client_and_db
+    _make_user(db)
+    provider = db.add_user()
+    monkeypatch.setitem(
+        nm_mod.node_manager.connected_nodes,
+        "node-busy",
+        _busy_node(provider["id"], model="qwen-2.5-7b"),
+    )
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "mistral-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "no_chat_provider"
+
+
+def test_refusal_skips_the_balance_lookup(client_and_db, monkeypatch):
+    """Availability is decided before any billing I/O.
+
+    The registry can answer instantly; the balance lookup is a database round
+    trip. Under load those round trips queued behind each other and turned a
+    refusal into a multi-second wait, so the refusal path must not touch them.
+    """
+    from app.config import settings
+    from app.services.billing_service import BillingService
+
+    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
+    client, db = client_and_db
+    _make_user(db)
+
+    def explode(self, user_id):  # noqa: ANN001
+        raise AssertionError("balance was fetched on a request that cannot be served")
+
+    monkeypatch.setattr(BillingService, "get_balance", explode)
+
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "no_chat_provider"
