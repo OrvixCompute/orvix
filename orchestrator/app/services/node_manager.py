@@ -229,6 +229,15 @@ class NodeManager:
             candidates.sort(key=lambda c: c.current_jobs)
         return candidates[0]
 
+    def served_models(self) -> set[str]:
+        """Every model advertised by a currently connected node.
+
+        Membership means "a node on the network runs this", not "a slot is free
+        right now" — a busy node still serves its models, and capacity is
+        transient. Callers wanting the momentary answer use select_node.
+        """
+        return {m for c in self.connected_nodes.values() for m in c.models_supported}
+
     def unavailable_reason(self, model: str, engine: str | None = None) -> str:
         """Why `select_node`/`select_image_node` came back empty.
 

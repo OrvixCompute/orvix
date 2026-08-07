@@ -158,6 +158,28 @@ Two different 503s, because they call for different responses:
 
 ---
 
+## Models
+
+### `GET /v1/models`
+OpenAI-compatible model catalog. No auth required.
+
+Each entry carries an Orvix-specific **`available`** flag: `true` when a
+currently connected node runs that model, `false` when it is only in the
+catalog. Requesting an unavailable model returns `503 no_chat_provider` /
+`no_image_provider`, so check this first rather than discovering it from the
+error. Extra fields are ignored by OpenAI clients.
+
+```json
+{ "object": "list", "data": [
+  { "id": "qwen-2.5-7b", "object": "model", "owned_by": "orvix",
+    "type": "chat", "available": true, "context_window": 32768 },
+  { "id": "mistral-7b", "object": "model", "owned_by": "orvix",
+    "type": "chat", "available": false, "context_window": 32768 }
+] }
+```
+
+---
+
 ## Billing
 
 All require **Auth: JWT.**
@@ -283,16 +305,22 @@ curl https://orvix.network/v1/network/stats
     "avg_latency_ms": 1000
   },
   "images": { "generated_total": 2, "generated_window": 1 },
-  "models": { "chat": 3, "image": 2 },
+  "models": { "chat": 3, "image": 2, "chat_available": 1, "image_available": 1 },
   "generated_at": "2026-07-26T10:00:00Z"
 }
 ```
 
-`nodes.online` is the number of nodes holding a live websocket connection right
-now and is read fresh on every call. Everything else is a database aggregate
-cached for `NETWORK_STATS_CACHE_SECONDS` (default 30), so `generated_at` is the
-snapshot time rather than the request time. `avg_latency_ms` is `null` when
-there were no requests in the window.
+Anything the live websocket registry can answer is read fresh on every call:
+`nodes.online`, the per-status counts (`ready`/`busy`/`draining`/`offline`), and
+`models.*_available`. The rest — registration totals, GPU breakdown, job and
+token volume — is a database aggregate cached for `NETWORK_STATS_CACHE_SECONDS`
+(default 30), so `generated_at` is the snapshot time rather than the request
+time. `avg_latency_ms` is `null` when there were no requests in the window.
+
+`models.chat`/`models.image` count the **catalog**; `chat_available` and
+`image_available` count what a connected node is actually running. The two differ
+whenever the catalog offers a model nobody serves, which is the case a client
+needs to see before it picks one.
 
 For the token/treasury side of the dashboard, see
 [`GET /v1/staking/network-stats`](#get-v1stakingnetwork-stats).

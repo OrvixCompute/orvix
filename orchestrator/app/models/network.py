@@ -44,8 +44,14 @@ class ImageStats(BaseModel):
 
 
 class ModelStats(BaseModel):
-    chat: int
-    image: int
+    chat: int = Field(..., description="Chat models in the catalog")
+    image: int = Field(..., description="Image models in the catalog")
+    chat_available: int = Field(
+        ..., description="Chat models a currently connected node actually serves"
+    )
+    image_available: int = Field(
+        ..., description="Image models a currently connected node actually serves"
+    )
 
 
 class NetworkStatsResponse(BaseModel):
