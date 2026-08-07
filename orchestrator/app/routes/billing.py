@@ -9,6 +9,7 @@ from supabase import Client
 from app.config import settings
 from app.database import get_supabase
 from app.dependencies import get_current_user
+from app.exceptions import OrvixException
 from app.models.billing import (
     BalanceResponse,
     TopupIntentInfo,
@@ -30,6 +31,20 @@ async def create_topup_intent(
     db: Client = Depends(get_supabase),
 ):
     """Create a top-up intent with a unique memo the user attaches to their transfer."""
+    # Refuse before touching the database. Without a treasury address this
+    # endpoint would hand back an empty `treasury_address` and a `solana:` QR
+    # with no recipient, inviting a transfer that can never arrive — and it
+    # would leave a pending intent row behind for a payment nobody can make.
+    # The variable is not gated by ENABLE_PAYMENT_LISTENER, so this refusal is
+    # the only thing standing between an unconfigured deploy and a user who
+    # thinks they have been given somewhere to send money.
+    if not settings.TREASURY_WALLET_ADDRESS:
+        raise OrvixException(
+            "Top-ups are temporarily unavailable",
+            error_code="treasury_unconfigured",
+            status_code=503,
+        )
+
     memo = f"orvx_{secrets.token_hex(6)}"  # 12 hex chars
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=INTENT_TTL_MINUTES)
 
