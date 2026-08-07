@@ -151,56 +151,135 @@ class PaymentListener:
 
         total = sum(Decimal(str(t["amount"])) for t in transfers)
 
-        if not memo:
-            logger.warning("Unattributed deposit (no memo): sig={} amount={}", signature, total)
+        # Attribution, in order of confidence.
+        #
+        # 1. The memo. It is the only thing that works when the signer is not the
+        #    depositor — an exchange withdrawal arrives signed by the exchange's
+        #    hot wallet, so nothing about the sender identifies the customer.
+        # 2. Failing that, the signing wallet. Users authenticate by signing with
+        #    a Solana wallet, so a deposit sent from that same wallet identifies
+        #    itself. This covers the case the memo path handles worst: someone
+        #    who simply sent USDC to the address without one, or whose 30-minute
+        #    intent expired before they got round to sending.
+        #
+        # Before this fallback existed a memo-less deposit was logged and
+        # abandoned — the money sat in the treasury, credited to nobody, and the
+        # depositor had no way to tell why.
+        intent = None
+        if memo:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            intent_res = (
+                db.table("topup_intents")
+                .select("*")
+                .eq("memo", memo)
+                .eq("status", "pending")
+                .gt("expires_at", now_iso)
+                .limit(1)
+                .execute()
+            )
+            if intent_res.data:
+                intent = intent_res.data[0]
+
+        if intent is not None:
+            await self._apply_topup(db, intent, signature, total)
             return
 
-        # Match the memo to a pending, non-expired intent.
-        now_iso = datetime.now(timezone.utc).isoformat()
-        intent_res = (
-            db.table("topup_intents")
-            .select("*")
-            .eq("memo", memo)
-            .eq("status", "pending")
-            .gt("expires_at", now_iso)
-            .limit(1)
-            .execute()
-        )
-        if not intent_res.data:
-            logger.warning(
-                "Unattributed deposit (no matching intent): memo={} sig={} amount={}",
-                memo,
+        sender = self._signing_wallet(transfers)
+        user_id = self._user_id_for_wallet(db, sender) if sender else None
+        if user_id:
+            logger.info(
+                "Deposit attributed by sender wallet (memo={}): sig={} wallet={} amount={}",
+                memo or "none",
                 signature,
+                sender,
                 total,
             )
+            await self._credit(db, user_id, signature, total, memo=memo, intent=None)
             return
-        intent = intent_res.data[0]
 
-        await self._apply_topup(db, intent, signature, total)
+        logger.warning(
+            "Unattributed deposit: sig={} amount={} memo={} sender={} — no matching "
+            "intent and the sending wallet belongs to no account",
+            signature,
+            total,
+            memo or "none",
+            sender or "unknown",
+        )
 
-    async def _apply_topup(self, db, intent: dict, signature: str, amount: Decimal) -> None:
-        user_id = intent["user_id"]
+    @staticmethod
+    def _signing_wallet(transfers: list[dict]) -> str | None:
+        """The wallet that authorised the transfer, i.e. the depositor.
 
-        # Record the ledger row AND credit the balance in a single DB
-        # transaction (see migrations/004_credit_topup.sql). The unique
-        # constraint on solana_signature is the sole idempotency guard: if this
-        # signature was already processed the function credits nothing and
-        # returns NULL. Crediting and inserting atomically removes the
-        # double-credit window that existed when we credited first and only
-        # inserted the ledger row afterwards.
+        `source` is the sender's token account, not their wallet — matching on it
+        would never find a user. `authority` is the account that signed, which is
+        what users register when they log in.
+        """
+        for t in transfers:
+            authority = t.get("authority")
+            if authority:
+                return str(authority)
+        return None
+
+    @staticmethod
+    def _user_id_for_wallet(db, wallet: str) -> str | None:
+        res = (
+            db.table("users").select("id").eq("wallet_address", wallet).limit(1).execute()
+        )
+        return res.data[0]["id"] if res.data else None
+
+    async def _credit(
+        self,
+        db,
+        user_id: str,
+        signature: str,
+        amount: Decimal,
+        *,
+        memo: str | None,
+        intent: dict | None,
+    ) -> bool:
+        """Credit a deposit atomically. Returns False if already credited.
+
+        Record the ledger row AND credit the balance in a single DB transaction
+        (see migrations/004_credit_topup.sql). The unique constraint on
+        solana_signature is the sole idempotency guard: if this signature was
+        already processed the function credits nothing and returns NULL.
+        Crediting and inserting atomically removes the double-credit window that
+        existed when we credited first and only inserted the ledger row
+        afterwards.
+
+        `intent` is optional — a deposit attributed by its sending wallet has no
+        intent to point at, and the function stores a null intent_id happily.
+        """
         res = db.rpc(
             "credit_topup",
             {
                 "p_user_id": user_id,
                 "p_amount": float(amount),
                 "p_signature": signature,
-                "p_memo": intent["memo"],
-                "p_intent_id": str(intent["id"]),
+                "p_memo": memo,
+                "p_intent_id": str(intent["id"]) if intent else None,
             },
         ).execute()
 
         if res.data is None:
             logger.info("Deposit {} already credited — skipping", signature)
+            return False
+
+        logger.info(
+            "Top-up applied: user={} amount={} sig={} via={}",
+            user_id,
+            amount,
+            signature,
+            "intent" if intent else "sender-wallet",
+        )
+        return True
+
+    async def _apply_topup(self, db, intent: dict, signature: str, amount: Decimal) -> None:
+        user_id = intent["user_id"]
+
+        if not await self._credit(
+            db, user_id, signature, amount, memo=intent["memo"], intent=intent
+        ):
             return
 
         # Update intent status based on expected vs received.
@@ -213,13 +292,7 @@ class PaymentListener:
             {"status": new_status, "fulfilled_at": datetime.now(timezone.utc).isoformat()}
         ).eq("id", intent["id"]).execute()
 
-        logger.info(
-            "Top-up applied: user={} amount={} status={} sig={}",
-            user_id,
-            amount,
-            new_status,
-            signature,
-        )
+        logger.info("Intent {} marked {} (sig={})", intent["id"], new_status, signature)
 
     # --- staking deposits --------------------------------------------------
     async def _process_stake(self, db, parsed: dict, signature: str, memo: str) -> None:
