@@ -109,7 +109,25 @@ async def test_unconfigured_wallet_alerts_instead_of_raising(monkeypatch):
     assert all(a["severity"] == CRITICAL for a in result["alerts"])
 
 
-async def test_rpc_client_is_closed_even_when_alerting(wired):
+async def test_shared_rpc_client_is_never_closed(wired):
+    """`get_solana_service()` is a process-wide singleton shared with the
+    payment listener and the payout worker.
+
+    An earlier version closed it in a `finally`, copying the shape used by the
+    one-shot scripts. On the long-lived orchestrator that poisoned the httpx
+    client for everyone: the first call to this endpoint returned 200, and every
+    RPC after it — deposit polling, payout broadcasts — died with "Cannot send a
+    request, as the client has been closed". Observed in production.
+    """
     fake = wired(payout_sol=0.0, payout_usdc=0.0, hot_sol=0.0)
     await check()
-    assert fake.closed is True
+    assert fake.closed is False
+
+
+async def test_client_survives_repeated_checks(wired):
+    """The regression was only visible on the *second* use, so check twice."""
+    fake = wired(payout_sol=0.1, payout_usdc=50, hot_sol=0.01)
+    first = await check()
+    second = await check()
+    assert fake.closed is False
+    assert first["wallets"] == second["wallets"]
