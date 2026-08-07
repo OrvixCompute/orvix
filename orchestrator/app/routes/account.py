@@ -13,7 +13,7 @@ from app.database import get_supabase
 from app.dependencies import get_current_user_flexible
 from app.logger import logger
 from app.models.billing import TierResponse
-from app.services import quota_service, tier_service
+from app.services import node_manager, quota_service, tier_service
 from app.services.holder import holder_service
 
 router = APIRouter(prefix="/v1/account", tags=["account"])
@@ -31,6 +31,10 @@ async def get_tier(
         tier=tier,
         staked_orvx=format(staked, "f"),
         discount_pct=tier_service.discount_pct_for_tier(tier),
+        # Report what the tier actually buys, so a caller can see the ceiling
+        # before hitting it rather than discovering it from a 429.
+        rate_limit_per_minute=tier_service.rate_limit_for_tier(tier),
+        priority_routing=tier in node_manager.PRIORITY_TIERS,
         next_tier=tier_service.next_tier_info(staked),
     )
 

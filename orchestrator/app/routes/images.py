@@ -22,6 +22,7 @@ import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -31,12 +32,19 @@ from supabase import Client
 from app.config import settings
 from app.database import get_supabase
 from app.dependencies import get_user_from_api_key
-from app.exceptions import OrvixException, ValidationError
+from app.exceptions import InsufficientBalanceError, OrvixException, ValidationError
 from app.logger import logger
 from app.models.image import ImageGenerationRequest
 from app.models.inference import IMAGE_MODELS, image_model_max_size
 from app.models.protocol import ImageJobDispatchMessage
-from app.services import quota_service, storage_service
+from app.services import (
+    image_pricing,
+    quota_service,
+    rate_limit_service,
+    storage_service,
+    tier_service,
+)
+from app.services.billing_service import BillingService
 from app.services.holder import holder_service
 from app.services.node_manager import (
     CAPACITY_RETRY_AFTER_SECONDS,
@@ -102,6 +110,9 @@ async def images_generations(
     db: Client = Depends(get_supabase),
 ):
     user = auth["user"]
+    api_key = auth["api_key"]
+    # Tier is stake-based, exactly as on the chat path.
+    tier = tier_service.tier_for_stake(user.get("staked_orvx"))
 
     if body.model not in IMAGE_MODELS:
         raise ValidationError(
@@ -121,16 +132,46 @@ async def images_generations(
 
     # Quota gate: holders get IMAGE_DAILY_LIMIT_HOLDER/day; when ORVX_MINT_ADDRESS
     # is unset, everyone gets the grace fallback. Consumes `n` units up front
-    # (raises 403 not_holder / 429 daily_quota_exceeded).
+    # (raises 403 not_holder / 429 daily_quota_exceeded), or returns the paid
+    # flow when the allowance is gone and the caller has USDC.
     is_holder, balance = await holder_service.get_holder_status(db, user["wallet_address"])
+    billing = BillingService(db)
+    current_balance = Decimal(billing.get_balance(user["id"])["balance_usdc"])
     quota = quota_service.enforce_image_quota(
-        db, user["wallet_address"], is_holder, balance, units=body.n
+        db, user["wallet_address"], is_holder, balance, units=body.n, usdc_balance=current_balance
     )
+    free = quota["free"]
+
+    # Rate limit only the free flow. A paying caller is already limited by the
+    # thing that matters — their balance — and throttling them per minute would
+    # cap revenue for no benefit; the node's own concurrency limit still protects
+    # it either way. Counted in its own bucket so an image burst cannot spend the
+    # caller's chat allowance.
+    if free:
+        rate_limit_service.check(api_key["id"], tier, bucket="image")
+
+    unit_price = Decimal("0") if free else image_pricing.price_per_image(width, height, tier)
+    if not free:
+        total = unit_price * body.n
+        if current_balance < total:
+            raise InsufficientBalanceError(
+                "Insufficient USDC balance for this request",
+                details={
+                    "current_balance": str(current_balance),
+                    "estimated_cost": str(total),
+                    "images": body.n,
+                },
+            )
 
     node = node_manager.select_image_node(body.model)
     if node is None:
-        # No node ever ran — refund the units we just consumed.
-        quota_service.refund_image_quota(db, user["wallet_address"], body.n)
+        # No node ever ran — refund the units we just consumed. Only the free
+        # flow consumed any: a paid request left the (already exhausted)
+        # allowance untouched, so refunding it would hand back units the caller
+        # never spent. Nothing has been deducted yet either — the charge happens
+        # per image, after each one succeeds.
+        if free:
+            quota_service.refund_image_quota(db, user["wallet_address"], body.n)
         # Same split as chat: busy-but-present is transient and worth retrying,
         # nothing-serves-this-model is not.
         reason = node_manager.unavailable_reason(body.model, engine="image")
@@ -187,8 +228,22 @@ async def images_generations(
                 ) from exc
 
             _filename, public_url = _save_image(png_bytes)
+
+            # Settle this image before moving to the next. Charging per image
+            # rather than once up front means a request for n images that dies
+            # halfway has only charged for the ones actually delivered — there
+            # is nothing to refund, because nothing was taken for work that did
+            # not happen.
+            if not free:
+                billing.deduct_usdc(user["id"], unit_price)
+            # Pay the provider their share. Chat has always done this; images
+            # never did, so providers served them for nothing. settle_job is
+            # engine-agnostic, so the same 70/30 split applies.
+            await node_manager.settle_job(node, unit_price)
+
             _record_image_job(
                 db,
+                cost=unit_price,
                 user_id=user["id"],
                 provider_id=node.provider_id,
                 model=body.model,
@@ -204,9 +259,12 @@ async def images_generations(
             else:
                 data.append({"url": public_url, "revised_prompt": None})
     except Exception:
-        # Refund the units that never produced an image, then re-raise.
+        # Give back what was taken for images that never arrived. Only the free
+        # flow consumed quota; the paid flow is charged per image *after* each
+        # one succeeds, so an interrupted paid request has already stopped
+        # charging on its own and has nothing to refund.
         unproduced = body.n - produced
-        if unproduced > 0:
+        if free and unproduced > 0:
             quota_service.refund_image_quota(db, user["wallet_address"], unproduced)
         raise
 
@@ -222,6 +280,7 @@ async def images_generations(
 def _record_image_job(
     db: Client,
     *,
+    cost: Decimal,
     user_id: str,
     provider_id: str,
     model: str,
@@ -240,7 +299,7 @@ def _record_image_job(
                 "prompt": prompt[:500],
                 "width": width,
                 "height": height,
-                "cost_usdc": 0,  # TODO(Session 4): variable pricing for non-holders
+                "cost_usdc": float(cost),
                 "image_url": image_url,
                 "created_at": now.isoformat(),
                 "expires_at": (now + timedelta(hours=24)).isoformat(),

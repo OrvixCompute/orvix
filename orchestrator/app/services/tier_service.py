@@ -23,6 +23,18 @@ TIER_THRESHOLDS: list[tuple[str, Decimal]] = [
     ("diamond", Decimal("250000")),
 ]
 
+# Requests per minute per API key, by tier. Bronze keeps the flat limit every
+# tier used to share, so nothing an existing caller relies on gets tighter.
+# Staking already bought a fee discount and (gold/diamond) preferential node
+# selection; throughput is the other thing a tier is expected to buy.
+TIER_RATE_LIMITS: dict[str, int] = {
+    "bronze": 60,
+    "silver": 120,
+    "gold": 300,
+    "diamond": 600,
+}
+_DEFAULT_RATE_LIMIT = TIER_RATE_LIMITS["bronze"]
+
 
 def _as_decimal(staked) -> Decimal:
     return Decimal(str(staked if staked is not None else 0))
@@ -44,6 +56,11 @@ def discount_pct_for_tier(tier: str) -> int:
     from app.services.inference_service import TIER_DISCOUNTS
 
     return int(TIER_DISCOUNTS.get(tier, Decimal("0")) * 100)
+
+
+def rate_limit_for_tier(tier: str) -> int:
+    """Requests per minute allowed for a tier. Unknown tiers get the bronze floor."""
+    return TIER_RATE_LIMITS.get(tier, _DEFAULT_RATE_LIMIT)
 
 
 def next_tier_info(staked) -> dict | None:

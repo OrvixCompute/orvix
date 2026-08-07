@@ -58,6 +58,12 @@ class TierResponse(BaseModel):
     tier: str
     staked_orvx: str
     discount_pct: int
+    rate_limit_per_minute: int = Field(
+        ..., description="Chat requests per minute allowed per API key at this tier"
+    )
+    priority_routing: bool = Field(
+        ..., description="Whether this tier gets least-loaded node selection"
+    )
     next_tier: Optional[NextTierInfo]
 
 

@@ -11,6 +11,7 @@ Reset: image quota is keyed by UTC date, so it resets at 00:00 UTC by rollover.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from supabase import Client
 
@@ -121,13 +122,28 @@ def _bump_image(db: Client, wallet: str, day: str, units: int) -> None:
 
 
 def enforce_image_quota(
-    db: Client, wallet: str, is_holder: bool, balance: float, units: int
+    db: Client,
+    wallet: str,
+    is_holder: bool,
+    balance: float,
+    units: int,
+    usdc_balance: Decimal | float = 0,
 ) -> dict:
-    """Gate an image request for `units` images. Returns {remaining, reset_at, limit}.
+    """Gate an image request for `units` images.
 
-    Raises 403 not_holder (when ORVX_MINT_ADDRESS is set and the caller is not a
-    holder) or 429 daily_quota_exceeded. When the mint address is unset, everyone
-    gets the fallback grace allowance.
+    Returns {type, remaining, reset_at, limit, free} where `type` is "free" when
+    the request came out of the daily allowance, or "paid" when the allowance was
+    exhausted and the caller has USDC to spend instead. Mirrors the chat gate:
+
+    - within the daily allowance: free, and the allowance is consumed.
+    - past it with a USDC balance: allowed on the paid flow, allowance untouched
+      (there is none left to consume).
+    - past it with no balance: 429 daily_quota_exceeded.
+
+    Raises 403 not_holder when ORVX_MINT_ADDRESS is set and the caller does not
+    hold enough ORVX; that gate is about eligibility, so a balance cannot buy
+    past it. When the mint address is unset, everyone gets the fallback grace
+    allowance.
     """
     address_set = bool(settings.ORVX_MINT_ADDRESS)
     if address_set:
@@ -146,14 +162,38 @@ def enforce_image_quota(
     day = _today_iso()
     used = _image_used(db, wallet, day)
     if used + units > daily_limit:
+        # Allowance gone. A caller with USDC pays instead of being refused; the
+        # allowance is deliberately NOT consumed here, since there is none left
+        # to consume and a refund on failure must not hand back units the caller
+        # never spent.
+        if float(usdc_balance) > 0:
+            return {
+                "type": "paid",
+                "free": False,
+                "remaining": 0,
+                "reset_at": _next_midnight_iso(),
+                "limit": daily_limit,
+            }
         raise OrvixException(
-            f"Daily image quota ({daily_limit}) exhausted. Resets at 00:00 UTC.",
+            f"Daily image quota ({daily_limit}) exhausted. Resets at 00:00 UTC, "
+            "or top up USDC to keep generating.",
             error_code="daily_quota_exceeded",
             status_code=429,
-            details={"reset_at": _next_midnight_iso(), "used": used, "daily_limit": daily_limit},
+            details={
+                "reset_at": _next_midnight_iso(),
+                "used": used,
+                "daily_limit": daily_limit,
+                "upgrade_url": settings.UPGRADE_URL,
+            },
         )
     _bump_image(db, wallet, day, units)
-    return {"remaining": daily_limit - (used + units), "reset_at": _next_midnight_iso(), "limit": daily_limit}
+    return {
+        "type": "free",
+        "free": True,
+        "remaining": daily_limit - (used + units),
+        "reset_at": _next_midnight_iso(),
+        "limit": daily_limit,
+    }
 
 
 def refund_image_quota(db: Client, wallet: str, units: int) -> None:

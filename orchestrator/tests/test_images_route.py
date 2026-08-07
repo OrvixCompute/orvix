@@ -1,5 +1,6 @@
 """Endpoint tests for POST /v1/images/generations (node dispatch + fetch mocked)."""
 
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -194,3 +195,155 @@ def test_size_is_case_and_whitespace_insensitive(client_and_db):
         json={"prompt": "x", "size": " 512X512 "},
     )
     assert resp.status_code == 200, resp.text
+
+
+# --- billing ---------------------------------------------------------------
+#
+# Images were free and providers were never paid for them. These pin the two
+# halves that are easiest to get wrong: who gets charged, and what is given back
+# when a request does not deliver everything it promised.
+
+
+@pytest.fixture
+def paid_client(client_and_db, monkeypatch):
+    """A caller whose daily allowance is gone but who has USDC to spend."""
+    client, db = client_and_db
+    monkeypatch.setattr(settings, "IMAGE_DAILY_LIMIT_HOLDER", 0)
+    monkeypatch.setattr(settings, "IMAGE_PRICE_USDC_PER_MEGAPIXEL", Decimal("0.01"))
+    settled = []
+
+    async def fake_settle(node, cost):
+        settled.append(Decimal(str(cost)))
+        return cost
+
+    monkeypatch.setattr(node_manager, "settle_job", fake_settle)
+    return client, db, settled
+
+
+def test_free_image_is_not_charged(client_and_db, monkeypatch):
+    client, db = client_and_db
+    before = Decimal(str(db._table("users").rows[0]["balance_usdc"]))
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "orvix-image-1", "prompt": "a fox", "size": "1024x1024", "n": 1},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert Decimal(str(db._table("users").rows[0]["balance_usdc"])) == before
+    assert float(db._table("image_jobs").rows[0]["cost_usdc"]) == 0.0
+
+
+def test_paid_image_deducts_and_pays_the_provider(paid_client):
+    client, db, settled = paid_client
+    before = Decimal(str(db._table("users").rows[0]["balance_usdc"]))
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "orvix-image-1", "prompt": "a fox", "size": "1024x1024", "n": 1},
+    )
+
+    assert resp.status_code == 200, resp.text
+    after = Decimal(str(db._table("users").rows[0]["balance_usdc"]))
+    charged = before - after
+    assert charged > 0
+    # gold tier carries a discount, so assert the recorded cost matches what was
+    # actually taken rather than hard-coding a number the discount table owns.
+    assert Decimal(str(db._table("image_jobs").rows[0]["cost_usdc"])) == charged
+    # The provider is paid for images now, not only for chat.
+    assert settled == [charged]
+
+
+def test_price_scales_with_area(paid_client):
+    """A 512x512 costs a quarter of a 1024x1024 — the GPU cost scales with area."""
+    client, db, _ = paid_client
+
+    def charge_for(size):
+        before = Decimal(str(db._table("users").rows[0]["balance_usdc"]))
+        r = client.post(
+            "/v1/images/generations",
+            headers={"Authorization": _KEY},
+            json={"model": "orvix-image-1", "prompt": "x", "size": size, "n": 1},
+        )
+        assert r.status_code == 200, r.text
+        return before - Decimal(str(db._table("users").rows[0]["balance_usdc"]))
+
+    big = charge_for("1024x1024")
+    small = charge_for("512x512")
+    assert small * 4 == big
+
+
+def test_paid_request_does_not_refund_quota_it_never_took(paid_client, monkeypatch):
+    """The allowance was already exhausted, so there is nothing to give back.
+
+    Refunding here would mint free images out of a failure.
+    """
+    client, db, _ = paid_client
+    monkeypatch.setattr(node_manager, "select_image_node", lambda model: None)
+    refunded = []
+    monkeypatch.setattr(
+        images_route.quota_service,
+        "refund_image_quota",
+        lambda db_, wallet, units: refunded.append(units),
+    )
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "orvix-image-1", "prompt": "x", "size": "1024x1024", "n": 2},
+    )
+
+    assert resp.status_code == 503
+    assert refunded == []
+
+
+def test_partial_failure_charges_only_for_delivered_images(paid_client, monkeypatch):
+    """Two requested, the second dies: exactly one image is paid for."""
+    client, db, settled = paid_client
+    before = Decimal(str(db._table("users").rows[0]["balance_usdc"]))
+    calls = {"n": 0}
+
+    async def flaky_dispatch(node, dispatch):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("node exploded")
+        return ImageJobCompleteMessage(
+            job_id=dispatch.job_id,
+            image_id="img-1",
+            binary_url="http://node/v1/binary/image/x",
+            metadata={},
+        )
+
+    monkeypatch.setattr(node_manager, "dispatch_image_job", flaky_dispatch)
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "orvix-image-1", "prompt": "x", "size": "1024x1024", "n": 2},
+    )
+
+    assert resp.status_code == 502
+    charged = before - Decimal(str(db._table("users").rows[0]["balance_usdc"]))
+    assert len(settled) == 1, "only the delivered image should have been settled"
+    assert charged == settled[0], "the caller paid for exactly what arrived"
+
+
+def test_insufficient_balance_is_refused_before_any_work(paid_client, monkeypatch):
+    client, db, settled = paid_client
+    db._table("users").rows[0]["balance_usdc"] = 0.000001
+    dispatched = []
+    monkeypatch.setattr(
+        node_manager, "dispatch_image_job", lambda *a, **k: dispatched.append(1)
+    )
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers={"Authorization": _KEY},
+        json={"model": "orvix-image-1", "prompt": "x", "size": "1024x1024", "n": 1},
+    )
+
+    assert resp.status_code == 402
+    assert dispatched == [], "no GPU work for a request that cannot pay"
+    assert settled == []
