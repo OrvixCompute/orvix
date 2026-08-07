@@ -75,7 +75,8 @@ class GPUDetector:
             if not _PYNVML_AVAILABLE:
                 logger.warning(
                     "pynvml not installed and stub mode off — no GPU detected. "
-                    "Install with `pip install orvix-node[gpu]` or set ORVIX_NODE_STUB_GPU=true."
+                    "Reinstall with the gpu extra, or set ORVIX_NODE_STUB_GPU=true. "
+                    "See the node README for the install command."
                 )
             return None
 

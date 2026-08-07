@@ -16,6 +16,15 @@ from orvix_node.inference.router import models_for_engine
 from orvix_node.version import __version__
 
 
+# orvix-node is not on PyPI, so `pip install orvix-node[gpu]` — what these
+# messages used to suggest — fails with "no matching distribution". Point at the
+# repository the installer actually uses.
+GPU_EXTRA_INSTALL = (
+    'pip install --upgrade "orvix-node[gpu] @ '
+    'git+https://github.com/OrvixCompute/orvix.git@main#subdirectory=orvix-node"'
+)
+
+
 def _fail(message: str, code: int = 1) -> None:
     click.secho(f"Error: {message}", fg="red", err=True)
     sys.exit(code)
@@ -76,7 +85,8 @@ async def _run_agent(cfg) -> None:
     gpu = detector.detect()
     if gpu is None:
         _fail(
-            "No GPU detected. Install with `pip install orvix-node[gpu]`, "
+            "No GPU detected. Reinstall with the gpu extra:\n"
+            f"  {GPU_EXTRA_INSTALL}\n"
             "or set ORVIX_NODE_STUB_GPU=true for development."
         )
     await state.set_gpu_status("ok")
@@ -324,7 +334,7 @@ def gpu(watch) -> None:
     if info is None:
         _fail(
             "No GPU detected. Set ORVIX_NODE_STUB_GPU=true to simulate one, "
-            "or install with `pip install orvix-node[gpu]`."
+            f"or reinstall with the gpu extra:\n  {GPU_EXTRA_INSTALL}"
         )
 
     def _print_info() -> None:

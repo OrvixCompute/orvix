@@ -46,7 +46,7 @@ provider requires staking **25,000 ORVX** in addition to eligible hardware — s
 the [Provider Guide](./provider-guide.md#provider-requirements).
 
 ```bash
-curl -fsSL https://get.orvix.network | sh   # placeholder install script
+curl -sSL https://raw.githubusercontent.com/OrvixCompute/orvix/main/orvix-node/install.sh | bash
 orvix-node start
 ```
 

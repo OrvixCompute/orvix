@@ -16,7 +16,7 @@ Real GPU inference (vLLM) is a one-file swap once you have a CUDA GPU (Prompt 7)
 
 **One-line (Linux providers):**
 ```bash
-curl -sSL https://get.orvix.network/node | bash
+curl -sSL https://raw.githubusercontent.com/OrvixCompute/orvix/main/orvix-node/install.sh | bash
 ```
 
 **Manual (development, any OS):**
@@ -135,7 +135,7 @@ ORVIX_NODE_STUB_GPU=true python test_connection.py
 
 ## Troubleshooting
 
-- **`No GPU detected`** — install `pip install orvix-node[nvml]`, or set
+- **`No GPU detected`** — reinstall with the `[nvml]` extra (see above), or set
   `ORVIX_NODE_STUB_GPU=true` for development.
 - **`Refusing insecure ws://`** — only `ws://localhost` is allowed without TLS;
   use `wss://` for remote orchestrators.

@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 # Orvix Node one-line installer (Linux providers; Ubuntu/Debian primary).
-#   curl -sSL https://get.orvix.network/node | bash
+#   curl -sSL https://raw.githubusercontent.com/OrvixCompute/orvix/main/orvix-node/install.sh | bash
 set -euo pipefail
 
 ORVIX_DIR="${HOME}/.orvix"
-PKG="orvix-node"
+
+# Installed straight from the repository, not from PyPI: the name `orvix-node`
+# is not published there, so `pip install orvix-node` failed at the first step
+# and took the whole installer with it. Worse, an unclaimed name is one anybody
+# can register — every provider running this script would then install a
+# stranger's code onto a GPU box.
+#
+# ORVIX_NODE_REF pins what gets installed. It defaults to main because a stale
+# tag is how providers ended up with an orchestrator URL that no longer
+# resolved; set it to a tag once releases are cut regularly.
+ORVIX_REPO="${ORVIX_REPO:-https://github.com/OrvixCompute/orvix.git}"
+ORVIX_NODE_REF="${ORVIX_NODE_REF:-main}"
+PKG="git+${ORVIX_REPO}@${ORVIX_NODE_REF}#subdirectory=orvix-node"
 
 info()  { printf '\033[0;36m[orvix]\033[0m %s\n' "$1"; }
 warn()  { printf '\033[0;33m[orvix]\033[0m %s\n' "$1"; }
@@ -43,8 +55,11 @@ main() {
   ensure_python
   mkdir -p "${ORVIX_DIR}/logs"
 
-  info "Installing ${PKG} via pip..."
-  python3 -m pip install --user --upgrade "${PKG}"
+  info "Installing orvix-node from ${ORVIX_REPO}@${ORVIX_NODE_REF}..."
+  if ! python3 -m pip install --user --upgrade "${PKG}"; then
+    err "Install failed. Is git installed, and is ${ORVIX_NODE_REF} a valid ref?"
+    exit 1
+  fi
 
   # Collect credentials.
   read -rp "Provider ID: " PROVIDER_ID
