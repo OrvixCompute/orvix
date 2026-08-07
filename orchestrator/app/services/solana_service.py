@@ -72,6 +72,17 @@ class SolanaService:
                 total += Decimal(amt)
         return total
 
+    async def get_sol_balance(self, address: str) -> Decimal:
+        """Native SOL balance of `address`, in SOL rather than lamports.
+
+        SOL is what actually strands a treasury wallet: the payout signer pays
+        the transaction fee AND the destination's ATA rent, so it can run dry
+        while still holding plenty of USDC.
+        """
+        result = await self._rpc("getBalance", [address])
+        lamports = (result or {}).get("value") or 0
+        return Decimal(lamports) / Decimal(1_000_000_000)
+
     async def get_latest_blockhash(self) -> str:
         result = await self._rpc("getLatestBlockhash", [{"commitment": "confirmed"}])
         return result["value"]["blockhash"]
