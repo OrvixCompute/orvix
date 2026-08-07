@@ -1,0 +1,14 @@
+[Unit]
+Description=Check the Orvix treasury balances every 6 hours
+
+[Timer]
+# Every 6 hours. Balances only fall through payouts, and the payout wallet holds
+# enough SOL for many of them, so a tighter interval would add RPC calls without
+# catching anything sooner.
+OnCalendar=*-*-* 00,06,12,18:15:00
+# Bare OnCalendar has no timezone: systemd resolves it against HOST local time,
+# not UTC. Offset from :00 to stay clear of the sweep and cleanup jobs.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

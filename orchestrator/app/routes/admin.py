@@ -17,6 +17,7 @@ from app.models.admin import (
     BuybackExecuteResponse,
 )
 from app.services import storage_service
+from app.services import treasury_health as treasury_health_service
 from app.services.burn_service import BurnService
 from app.services.buyback_service import BuybackService
 from app.services.hot_sweeper import hot_sweeper
@@ -100,6 +101,16 @@ async def treasury_balances(db: Client = Depends(get_supabase)):
     """Last-synced treasury balances from the DB (call /treasury/sync to refresh)."""
     res = db.table("treasury_wallets").select("*").execute()
     return {"wallets": res.data or []}
+
+
+@router.get("/treasury/health")
+async def treasury_health():
+    """Live treasury balances checked against their floors.
+
+    Reads the chain rather than the last-synced row: a monitor that can only
+    see stale values cannot catch a balance falling while nobody is watching.
+    """
+    return await treasury_health_service.check()
 
 
 @router.post("/treasury/sync")

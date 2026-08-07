@@ -199,6 +199,29 @@ class Settings(BaseSettings):
         False, description="Start the daily hot-wallet sweeper (usually run via systemd timer instead)"
     )
 
+    # --- Treasury health thresholds ----------------------------------------
+    # Defaults come from a measured mainnet payout, not estimates: paying a
+    # provider for the first time cost 0.002044 SOL (destination ATA rent plus
+    # fee), and a repeat payout costs only the ~0.000005 fee.
+    TREASURY_MIN_PAYOUT_SOL: float = Field(
+        0.02,
+        description=(
+            "Warn when the payout wallet's SOL drops below this. 0.02 covers "
+            "roughly 10 first-time provider payouts at 0.002 SOL of ATA rent each."
+        ),
+    )
+    TREASURY_MIN_PAYOUT_USDC: float = Field(
+        5.0,
+        description="Warn when the payout wallet's USDC float drops below this",
+    )
+    TREASURY_MIN_HOT_SOL: float = Field(
+        0.005,
+        description=(
+            "Warn when the hot wallet's SOL drops below this. Hot only signs "
+            "hot->main sweeps, so it needs fees but no ATA rent."
+        ),
+    )
+
     # --- Public network stats ----------------------------------------------
     NETWORK_STATS_CACHE_SECONDS: int = Field(
         30,

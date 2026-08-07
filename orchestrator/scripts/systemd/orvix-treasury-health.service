@@ -1,0 +1,18 @@
+[Unit]
+Description=Orvix treasury balance check (warn before payout SOL or USDC runs dry)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# pydantic-settings loads .env from the working directory.
+WorkingDirectory=/opt/orvix/orchestrator
+Environment=PYTHONPATH=/opt/orvix/orchestrator
+ExecStart=/opt/orvix/orchestrator/.venv/bin/python scripts/treasury_health.py
+# Read-only: it queries balances and signs nothing. Runs as the same user as
+# the rest of the deployment rather than root.
+User=ubuntu
+Group=ubuntu
+# The script exits 1 on a breached threshold on purpose, so the unit is left in
+# a failed state and `systemctl list-units --failed` shows it. That is the
+# alert — do not "fix" it by swallowing the exit code.
