@@ -47,11 +47,11 @@ def test_estimate_prompt_tokens_positive():
 def _reset_rate_limiter():
     """The limiter is module-global and every test here reuses one api_key_id,
     so without this the suite eventually trips its own 60/min limit."""
-    from app.routes.inference import _hits
+    from app.services import rate_limit_service
 
-    _hits.clear()
+    rate_limit_service.reset()
     yield
-    _hits.clear()
+    rate_limit_service.reset()
 
 
 @pytest.fixture

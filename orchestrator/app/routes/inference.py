@@ -14,7 +14,6 @@ import asyncio
 import json
 import time
 import uuid
-from collections import defaultdict, deque
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Request
@@ -27,7 +26,6 @@ from app.dependencies import get_user_from_api_key
 from app.exceptions import (
     InsufficientBalanceError,
     OrvixException,
-    RateLimitError,
     ValidationError,
 )
 from app.logger import logger
@@ -39,7 +37,7 @@ from app.models.inference import (
     Usage,
 )
 from app.models.protocol import JobMessage
-from app.services import inference_service, quota_service, tier_service
+from app.services import inference_service, quota_service, rate_limit_service, tier_service
 from app.services.billing_service import BillingService
 from app.services.holder import holder_service
 from app.services.node_manager import (
@@ -50,30 +48,6 @@ from app.services.node_manager import (
 
 router = APIRouter(prefix="/v1", tags=["inference"])
 
-# --- Simple in-memory rate limiter (per API key) ---------------------------
-# TODO: replace with Redis so limits hold across processes/restarts.
-RATE_WINDOW = 60.0  # seconds
-_hits: dict[str, deque] = defaultdict(deque)
-
-
-def _check_rate_limit(api_key_id: str, tier: str) -> None:
-    """Enforce the caller's per-minute ceiling, which is set by their tier."""
-    limit = tier_service.rate_limit_for_tier(tier)
-    now = time.monotonic()
-    q = _hits[api_key_id]
-    while q and now - q[0] > RATE_WINDOW:
-        q.popleft()
-    if len(q) >= limit:
-        raise RateLimitError(
-            f"Rate limit exceeded: max {limit} requests per minute on the {tier} tier",
-            details={
-                "retry_after_seconds": int(RATE_WINDOW - (now - q[0])) + 1,
-                "tier": tier,
-                "limit_per_minute": limit,
-                "upgrade_url": settings.UPGRADE_URL,
-            },
-        )
-    q.append(now)
 
 
 def _provider_earning(cost: Decimal) -> Decimal:
@@ -154,7 +128,7 @@ async def chat_completions(
     # Tier is stake-based: derived from the user's staked ORVX, not a stored flag.
     tier = tier_service.tier_for_stake(user.get("staked_orvx"))
 
-    _check_rate_limit(api_key["id"], tier)
+    rate_limit_service.check(api_key["id"], tier, bucket="chat")
     inference_service.validate_model(body.model)
 
     if body.tools and body.stream:

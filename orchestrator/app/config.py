@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables via pydantic-settings."""
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import List
 
@@ -137,6 +138,19 @@ class Settings(BaseSettings):
     )
     IMAGE_DAILY_LIMIT_FALLBACK: int = Field(
         1, description="Daily image generations for everyone when ORVX_MINT_ADDRESS is unset"
+    )
+    # PLACEHOLDER PRICE — set this deliberately before charging anyone. It is
+    # priced per 1024x1024 image and scaled by pixel count, because that is what
+    # drives the cost: a measured 1024x1024 generation takes ~2.3 s of GPU and
+    # peaks near 19.6 GiB of VRAM, and both scale with area. 0.01 is a round
+    # number, not a researched one.
+    IMAGE_PRICE_USDC_PER_MEGAPIXEL: Decimal = Field(
+        Decimal("0.01"),
+        description=(
+            "USDC charged per 1024x1024-equivalent image (1.048576 MP). Larger "
+            "sizes cost proportionally more, smaller ones less. Applies only "
+            "once a caller is past their free daily allowance."
+        ),
     )
     HOLDER_CACHE_TTL_MINUTES: int = Field(
         15, description="How long a holder-status lookup is cached"

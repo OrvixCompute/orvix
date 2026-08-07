@@ -152,22 +152,40 @@ def test_rate_limit_rises_with_tier():
     assert tier_service.rate_limit_for_tier("titanium") == 60
 
 
-def test_bronze_is_limited_where_diamond_is_not(monkeypatch):
+def test_bronze_is_limited_where_diamond_is_not():
     """The ceiling actually applied is the caller's tier ceiling."""
-    from collections import defaultdict, deque
-
     from app.exceptions import RateLimitError
-    from app.routes import inference as inf
+    from app.services import rate_limit_service
 
-    monkeypatch.setattr(inf, "_hits", defaultdict(deque))
+    rate_limit_service.reset()
 
     for _ in range(60):
-        inf._check_rate_limit("key-bronze", "bronze")
+        rate_limit_service.check("key-bronze", "bronze")
     with pytest.raises(RateLimitError) as exc:
-        inf._check_rate_limit("key-bronze", "bronze")
+        rate_limit_service.check("key-bronze", "bronze")
     assert exc.value.details["tier"] == "bronze"
     assert exc.value.details["limit_per_minute"] == 60
 
     # A diamond key sails past the point where bronze was cut off.
     for _ in range(300):
-        inf._check_rate_limit("key-diamond", "diamond")
+        rate_limit_service.check("key-diamond", "diamond")
+
+
+def test_chat_and_image_ceilings_are_counted_separately():
+    """A burst of images must not spend the caller's chat allowance.
+
+    They cost very different amounts of GPU time, so sharing one counter would
+    let a cheap resource exhaust an expensive one's budget and vice versa.
+    """
+    from app.exceptions import RateLimitError
+    from app.services import rate_limit_service
+
+    rate_limit_service.reset()
+
+    for _ in range(60):
+        rate_limit_service.check("key-a", "bronze", bucket="image")
+    with pytest.raises(RateLimitError):
+        rate_limit_service.check("key-a", "bronze", bucket="image")
+
+    # Chat is untouched by the image burst above.
+    rate_limit_service.check("key-a", "bronze", bucket="chat")
