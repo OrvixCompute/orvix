@@ -132,3 +132,42 @@ def test_account_tier_via_api_key_end_to_end():
         assert r.json()["tier"] == "gold"
     finally:
         app.dependency_overrides.clear()
+
+
+# --- tier-gated throughput -------------------------------------------------
+def test_rate_limit_rises_with_tier():
+    """Staking buys throughput, not only a discount.
+
+    Every tier used to share one flat 60/min ceiling, which made the published
+    "higher API limits" benefit untrue.
+    """
+    from app.services import tier_service
+
+    limits = [tier_service.rate_limit_for_tier(t) for t in ("bronze", "silver", "gold", "diamond")]
+    assert limits == sorted(limits)
+    assert len(set(limits)) == 4
+    # Bronze keeps the historical flat limit, so no existing caller gets tighter.
+    assert tier_service.rate_limit_for_tier("bronze") == 60
+    # An unknown tier must not accidentally grant more than the floor.
+    assert tier_service.rate_limit_for_tier("titanium") == 60
+
+
+def test_bronze_is_limited_where_diamond_is_not(monkeypatch):
+    """The ceiling actually applied is the caller's tier ceiling."""
+    from collections import defaultdict, deque
+
+    from app.exceptions import RateLimitError
+    from app.routes import inference as inf
+
+    monkeypatch.setattr(inf, "_hits", defaultdict(deque))
+
+    for _ in range(60):
+        inf._check_rate_limit("key-bronze", "bronze")
+    with pytest.raises(RateLimitError) as exc:
+        inf._check_rate_limit("key-bronze", "bronze")
+    assert exc.value.details["tier"] == "bronze"
+    assert exc.value.details["limit_per_minute"] == 60
+
+    # A diamond key sails past the point where bronze was cut off.
+    for _ in range(300):
+        inf._check_rate_limit("key-diamond", "diamond")

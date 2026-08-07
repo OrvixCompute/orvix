@@ -52,20 +52,26 @@ router = APIRouter(prefix="/v1", tags=["inference"])
 
 # --- Simple in-memory rate limiter (per API key) ---------------------------
 # TODO: replace with Redis so limits hold across processes/restarts.
-RATE_LIMIT = 60  # requests
 RATE_WINDOW = 60.0  # seconds
 _hits: dict[str, deque] = defaultdict(deque)
 
 
-def _check_rate_limit(api_key_id: str) -> None:
+def _check_rate_limit(api_key_id: str, tier: str) -> None:
+    """Enforce the caller's per-minute ceiling, which is set by their tier."""
+    limit = tier_service.rate_limit_for_tier(tier)
     now = time.monotonic()
     q = _hits[api_key_id]
     while q and now - q[0] > RATE_WINDOW:
         q.popleft()
-    if len(q) >= RATE_LIMIT:
+    if len(q) >= limit:
         raise RateLimitError(
-            f"Rate limit exceeded: max {RATE_LIMIT} requests per minute",
-            details={"retry_after_seconds": int(RATE_WINDOW - (now - q[0])) + 1},
+            f"Rate limit exceeded: max {limit} requests per minute on the {tier} tier",
+            details={
+                "retry_after_seconds": int(RATE_WINDOW - (now - q[0])) + 1,
+                "tier": tier,
+                "limit_per_minute": limit,
+                "upgrade_url": settings.UPGRADE_URL,
+            },
         )
     q.append(now)
 
@@ -148,7 +154,7 @@ async def chat_completions(
     # Tier is stake-based: derived from the user's staked ORVX, not a stored flag.
     tier = tier_service.tier_for_stake(user.get("staked_orvx"))
 
-    _check_rate_limit(api_key["id"])
+    _check_rate_limit(api_key["id"], tier)
     inference_service.validate_model(body.model)
 
     if body.tools and body.stream:
