@@ -116,3 +116,43 @@ def test_non_transfer_instruction_ignored():
 
 def test_malformed_tx_returns_empty():
     assert SolanaService.extract_spl_transfers({}, MINT, "owner") == []
+
+
+# --- RPC option shape -------------------------------------------------------
+
+
+def test_send_raw_transaction_preflight_matches_blockhash_commitment():
+    """Preflight must simulate at the same commitment the blockhash came from.
+
+    get_latest_blockhash() asks for "confirmed". sendTransaction's preflight
+    defaults to "finalized", which trails it by a slot or two, so the simulating
+    node has not seen that blockhash yet and rejects the transaction with
+    BlockhashNotFound — observed on mainnet while creating the treasury ATAs.
+    Every signed transaction goes through here, payouts included.
+    """
+    import asyncio
+
+    captured = {}
+
+    class _Svc(SolanaService):
+        def __init__(self):  # bypass the httpx client setup
+            pass
+
+        async def _rpc(self, method, params):
+            captured["method"] = method
+            captured["params"] = params
+            return "sig"
+
+    svc = _Svc()
+    asyncio.run(svc.send_raw_transaction("dGVzdA=="))
+
+    assert captured["method"] == "sendTransaction"
+    opts = captured["params"][1]
+    assert opts["preflightCommitment"] == "confirmed"
+
+    # Pin the pairing itself: whatever commitment the blockhash is fetched at,
+    # preflight has to match it, or this bug comes straight back.
+    import inspect
+
+    src = inspect.getsource(SolanaService.get_latest_blockhash)
+    assert '"commitment": "confirmed"' in src
