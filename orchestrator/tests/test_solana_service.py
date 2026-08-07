@@ -156,3 +156,35 @@ def test_send_raw_transaction_preflight_matches_blockhash_commitment():
 
     src = inspect.getsource(SolanaService.get_latest_blockhash)
     assert '"commitment": "confirmed"' in src
+
+
+def test_get_parsed_transaction_uses_a_real_rpc_method():
+    """`getParsedTransaction` is a web3.js client helper, not a JSON-RPC method.
+
+    Sending it to a node returns -32601 Method not found, so the payment
+    listener discovered every incoming deposit and then failed to read a single
+    one — silently, as a per-signature warning. The RPC method is
+    `getTransaction`; parsing is requested via the encoding option.
+    """
+    import asyncio
+
+    captured = {}
+
+    class _Svc(SolanaService):
+        def __init__(self):  # bypass the httpx client setup
+            pass
+
+        async def _rpc(self, method, params):
+            captured["method"] = method
+            captured["params"] = params
+            return {}
+
+    asyncio.run(_Svc().get_parsed_transaction("sig123"))
+
+    assert captured["method"] == "getTransaction"
+    sig, opts = captured["params"]
+    assert sig == "sig123"
+    # Parsing and version support still have to be requested, or the listener
+    # gets raw binary it cannot read, or chokes on versioned transactions.
+    assert opts["encoding"] == "jsonParsed"
+    assert opts["maxSupportedTransactionVersion"] == 0

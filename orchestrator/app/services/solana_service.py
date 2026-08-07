@@ -45,8 +45,13 @@ class SolanaService:
         return await self._rpc("getSignaturesForAddress", [address, opts]) or []
 
     async def get_parsed_transaction(self, signature: str) -> Optional[dict]:
+        # The RPC method is `getTransaction`; parsing is requested through the
+        # encoding option. `getParsedTransaction` is a web3.js *client* helper,
+        # not a JSON-RPC method, and the node answers it with -32601 Method not
+        # found — so the payment listener found every deposit and then failed to
+        # read a single one of them.
         return await self._rpc(
-            "getParsedTransaction",
+            "getTransaction",
             [signature, {"maxSupportedTransactionVersion": 0, "encoding": "jsonParsed"}],
         )
 
