@@ -239,3 +239,34 @@ def test_burn_history_public(ctx):
     assert len(body) == 1
     assert body[0]["solana_signature"] == "sig-burn-1"
     assert Decimal(body[0]["orvx_burned"]) == Decimal("5000")
+
+
+def test_network_stats_never_returns_scientific_notation(ctx):
+    """Small accounting balances must render as plain decimals.
+
+    str() on a float like 0.000008 yields "8e-06", which reached this public
+    endpoint verbatim and reads as garbage to any client that displays it.
+    """
+    client, db, _user = ctx
+    db._table("global_accounting").insert_row(
+        {
+            "id": 1,
+            "buyback_budget_usdc": 0.000008,
+            "orvx_held_for_burn": 0.0000005,
+            "total_orvx_burned": 0,
+            "total_orvx_bought": 1234.5,
+        }
+    )
+
+    body = client.get("/v1/staking/network-stats").json()
+
+    for field in (
+        "total_staked",
+        "buyback_budget_usdc",
+        "orvx_held_for_burn",
+        "total_orvx_burned",
+        "total_orvx_bought",
+    ):
+        assert "e" not in body[field].lower(), f"{field} leaked scientific notation: {body[field]}"
+    assert body["buyback_budget_usdc"] == "0.000008"
+    assert body["total_orvx_bought"] == "1234.5"

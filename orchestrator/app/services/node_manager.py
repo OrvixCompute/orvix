@@ -40,6 +40,10 @@ HEARTBEAT_STALE_S = 60.0
 HEALTH_CHECK_INTERVAL_S = 30.0
 # Tiers that get preferential (least-loaded) node selection.
 PRIORITY_TIERS = {"gold", "diamond"}
+# Retry hint sent with capacity_exhausted. Jobs on a saturated node finish in a
+# couple of seconds, so a short retry usually succeeds where the first attempt
+# lost the race for a slot.
+CAPACITY_RETRY_AFTER_SECONDS = 3
 
 
 class NodeTimeoutError(Exception):
@@ -224,6 +228,25 @@ class NodeManager:
         if user_tier in PRIORITY_TIERS:
             candidates.sort(key=lambda c: c.current_jobs)
         return candidates[0]
+
+    def unavailable_reason(self, model: str, engine: str | None = None) -> str:
+        """Why `select_node`/`select_image_node` came back empty.
+
+        Returns ``"at_capacity"`` when nodes serve the model but are all busy or
+        draining, and ``"no_node"`` when nothing on the network serves it at all.
+        These need different answers: at capacity the caller should retry shortly,
+        while no_node means retrying will never help until a node loads the model.
+
+        Diagnostic only — it re-reads the registry, so a node can free up between
+        the failed selection and this call. The worst case is a slightly stale
+        reason on an error path, never a wrong routing decision.
+        """
+        serving = [
+            c
+            for c in self.connected_nodes.values()
+            if model in c.models_supported and (engine is None or engine in c.engines)
+        ]
+        return "at_capacity" if serving else "no_node"
 
     def select_image_node(self, model: str) -> NodeConnection | None:
         """Pick a ready node that advertises the image engine and serves `model`."""
