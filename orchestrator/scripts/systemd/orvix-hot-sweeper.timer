@@ -2,7 +2,10 @@
 Description=Run the Orvix hot-wallet sweep daily
 
 [Timer]
-# 00:30 UTC — after image cleanup (hourly) and clear of other daily jobs.
+# 00:30 in the HOST's local timezone, not UTC — OnCalendar has no timezone here,
+# and systemd resolves a bare calendar spec against local time. Chosen to land
+# after image cleanup (hourly) and clear of other daily jobs. Add an explicit
+# `OnCalendar=*-*-* 00:30:00 UTC` if a fixed absolute time ever matters.
 OnCalendar=*-*-* 00:30:00
 Persistent=true
 

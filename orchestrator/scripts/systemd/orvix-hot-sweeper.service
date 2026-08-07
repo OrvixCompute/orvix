@@ -10,4 +10,10 @@ WorkingDirectory=/opt/orvix/orchestrator
 # app package importable (sweep_hot.py does `from app... import`).
 Environment=PYTHONPATH=/opt/orvix/orchestrator
 ExecStart=/opt/orvix/orchestrator/.venv/bin/python scripts/sweep_hot.py
-User=root
+# This job signs with the hot wallet key, so it runs as the owner of that key
+# rather than as root. `ubuntu` already owns .env, the keypair files and the
+# venv; verified by running scripts/sweep_hot.py by hand as ubuntu. Running it
+# as root would also drop root-owned .pyc files into the tree the main service
+# runs from.
+User=ubuntu
+Group=ubuntu
