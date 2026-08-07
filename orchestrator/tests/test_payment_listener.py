@@ -364,3 +364,68 @@ async def test_unknown_sender_without_a_memo_credits_nobody(db, listener, wired)
 
     assert float(db._table("users").rows[0]["balance_usdc"]) == pytest.approx(5.0)
     assert db._table("transactions").rows == []
+
+
+# --- which addresses get polled --------------------------------------------
+#
+# Watching only the owner wallet is why no deposit was ever detected.
+# `getSignaturesForAddress` returns transactions the address appears in, and an
+# SPL transfer into an ATA names the ATA, the mint and the sender — never the
+# ATA's owner. Confirmed against a real 0.11 USDC deposit that appeared under the
+# treasury's USDC ATA and was completely absent from the wallet's history.
+
+
+def test_token_accounts_are_watched_not_just_the_wallet(listener, monkeypatch):
+    import app.services.payment_listener as pl
+
+    monkeypatch.setattr(pl.settings, "TREASURY_WALLET_ADDRESS", "TreasuryWallet")
+    listener._treasury_token_accounts = {"usdc-ata"}
+    listener._treasury_orvx_token_accounts = {"orvx-ata"}
+
+    watched = listener._watched_addresses()
+
+    assert "usdc-ata" in watched, "the USDC ATA is where deposits actually land"
+    assert "orvx-ata" in watched, "stake deposits land in the ORVX ATA"
+    assert "TreasuryWallet" in watched, "still catches what the treasury itself signs"
+
+
+def test_watched_addresses_are_deduped_and_skip_blanks(listener, monkeypatch):
+    """Cursors are keyed by address, so a repeat would poll the same place twice."""
+    import app.services.payment_listener as pl
+
+    monkeypatch.setattr(pl.settings, "TREASURY_WALLET_ADDRESS", "same")
+    listener._treasury_token_accounts = {"same"}
+    listener._treasury_orvx_token_accounts = set()
+
+    assert listener._watched_addresses() == ["same"]
+
+
+async def test_each_address_keeps_its_own_cursor(db, listener, monkeypatch):
+    """One shared cursor would let one address's newest signature hide another's."""
+    import app.services.payment_listener as pl
+
+    monkeypatch.setattr(pl, "get_supabase", lambda: db)
+    monkeypatch.setattr(pl.settings, "TREASURY_WALLET_ADDRESS", "wallet")
+    listener._treasury_token_accounts = {"ata"}
+
+    seen = []
+
+    class _Sol:
+        async def get_signatures_for_address(self, address, limit=25, until=None):
+            seen.append((address, until))
+            return [{"signature": f"sig-{address}", "err": None}]
+
+    monkeypatch.setattr(pl, "get_solana_service", lambda: _Sol())
+    monkeypatch.setattr(listener, "_process_signature", lambda sig: _noop())
+
+    await listener._poll_once()
+    await listener._poll_once()
+
+    # Second cycle must carry each address's own cursor, not a shared one.
+    assert ("wallet", None) in seen and ("ata", None) in seen
+    assert ("wallet", "sig-wallet") in seen
+    assert ("ata", "sig-ata") in seen
+
+
+async def _noop():
+    return None
