@@ -137,7 +137,7 @@ ORVIX_NODE_STUB_GPU=true python test_connection.py
 
 ## Troubleshooting
 
-- **`No GPU detected`** — reinstall with the `[nvml]` extra (see above), or set
+- **`No GPU detected`** — `pip install --upgrade "orvix-node[nvml]"`, or set
   `ORVIX_NODE_STUB_GPU=true` for development.
 - **`Refusing insecure ws://`** — only `ws://localhost` is allowed without TLS;
   use `wss://` for remote orchestrators.
