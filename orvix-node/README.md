@@ -104,6 +104,30 @@ Node                                  Orchestrator
 On disconnect the node reconnects with exponential backoff (1→2→4…→60s).
 A rejected registration (`accepted=false`) is **not** retried.
 
+## Releasing
+
+Publishing is automated and tokenless — PyPI trusts this repository through
+OIDC, so there is no API token to leak.
+
+```bash
+# 1. bump orvix_node/version.py (the single source; pyproject reads it)
+# 2. merge that
+git tag node-v0.2.1
+git push origin node-v0.2.1
+```
+
+The `node-` prefix matters: this repository also tags its own releases as
+`v0.2.0`, and the package has a separate version line. The prefix says which
+artefact moved.
+
+The workflow refuses to publish if the tag disagrees with `version.py`. PyPI
+never lets a version be re-uploaded, so a mismatch is worth failing on rather
+than discovering afterwards.
+
+**Providers install the last *published* version.** A fix merged to `main` does
+not reach them until a release is cut — set `ORVIX_NODE_REF` to install from a
+git ref if you need one before then.
+
 ## Architecture
 
 | File | Responsibility |
