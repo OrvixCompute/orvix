@@ -142,6 +142,37 @@ class OrchestratorClient:
                 pass
             backoff = min(backoff * 2, MAX_BACKOFF)
 
+    async def verify(self) -> str:
+        """Connect, register, disconnect. Returns the node id the orchestrator gave.
+
+        Used by `orvix-node join` to prove credentials work *before* they are
+        written to disk. Registering is the only real test: the orchestrator
+        rejects a bad provider id or secret at this handshake, so a typo surfaces
+        here with the server's own reason instead of as a start-up failure the
+        provider has to go read logs for.
+
+        Reuses the same handshake `_run_once` performs, rather than a parallel
+        copy that could drift from it.
+        """
+        self._check_transport_security()
+        async with websockets.connect(
+            self._connect_url(), max_size=8 * 1024 * 1024, ping_interval=None
+        ) as ws:
+            try:
+                await self._register(ws)
+            except websockets.exceptions.ConnectionClosed as exc:
+                # The orchestrator answers a bad provider id or secret with a
+                # register_ack(accepted=False) and closes immediately after. The
+                # close often wins the race, so the client sees a dropped
+                # connection rather than the reason. Reporting that as a network
+                # problem would send someone with a typo to debug their firewall.
+                raise AuthError(
+                    "The orchestrator closed the connection during registration. "
+                    "That usually means the provider id or node secret is wrong "
+                    f"({exc})."
+                ) from exc
+            return state.node_id or ""
+
     async def _run_once(self) -> None:
         url = self._connect_url()
         logger.info("Connecting to {}", url)

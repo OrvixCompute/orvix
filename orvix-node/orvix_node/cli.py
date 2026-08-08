@@ -10,7 +10,14 @@ from pathlib import Path
 
 import click
 
-from orvix_node.config import config_path, init_config_file, load_config
+from orvix_node.config import (
+    CONFIG_TEMPLATE,
+    NodeConfig,
+    config_path,
+    init_config_file,
+    load_config,
+    resolve_node_id,
+)
 from orvix_node.exceptions import AuthError, ConfigError
 from orvix_node.inference.router import models_for_engine
 from orvix_node.version import __version__
@@ -412,3 +419,100 @@ def test_inference(prompt, model, stream) -> None:
 
 if __name__ == "__main__":
     cli()
+
+
+# ---------------------------------------------------------------------------
+# join
+# ---------------------------------------------------------------------------
+def _write_joined_config(path: Path, cfg: NodeConfig) -> None:
+    """Write a config file for a verified set of credentials.
+
+    Built from the template so a joined node gets the same commented defaults a
+    hand-made config has — the file is something the provider will edit later,
+    and a bare four-line dump would strip every explanation of what they can
+    tune.
+    """
+    body = CONFIG_TEMPLATE
+    replacements = {
+        "provider_id": cfg.provider_id,
+        "node_secret": cfg.node_secret,
+        "orchestrator_url": cfg.orchestrator_url,
+        "model": cfg.model,
+    }
+    lines = []
+    for line in body.splitlines():
+        key = line.split(":", 1)[0].strip()
+        if key in replacements:
+            comment = line.split("#", 1)[1] if "#" in line else ""
+            suffix = f"   #{comment}" if comment else ""
+            lines.append(f'{key}: "{replacements[key]}"{suffix}')
+        else:
+            lines.append(line)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)  # holds the node secret
+    except OSError:
+        pass
+
+
+@cli.command()
+@click.option("--provider-id", help="Provider id from POST /v1/provider/register")
+@click.option("--node-secret", help="Node secret issued with it (kept private)")
+@click.option("--orchestrator-url", help="Override the orchestrator URL")
+@click.option("--model", help="Chat model this node will serve")
+@click.option("--force", is_flag=True, help="Overwrite an existing config")
+@click.option("--skip-verify", is_flag=True, help="Write the config without contacting the orchestrator")
+def join(provider_id, node_secret, orchestrator_url, model, force, skip_verify) -> None:
+    """Join the network: verify credentials, then write the config.
+
+    Credentials come from the dashboard (POST /v1/provider/register), which
+    authenticates with a wallet signature. That signing key deliberately never
+    touches this machine, so this command takes the credentials rather than
+    minting them.
+    """
+    path = config_path()
+    if path.exists() and not force:
+        _fail(
+            f"Config already exists at {path}. Re-run with --force to replace it, "
+            "or edit it directly."
+        )
+
+    provider_id = provider_id or click.prompt("Provider ID")
+    node_secret = node_secret or click.prompt("Node secret", hide_input=True)
+
+    defaults = NodeConfig(provider_id="x", node_secret="x")
+    cfg = NodeConfig(
+        provider_id=provider_id.strip(),
+        node_secret=node_secret.strip(),
+        orchestrator_url=(orchestrator_url or defaults.orchestrator_url).strip(),
+        model=(model or defaults.model).strip(),
+        node_id=resolve_node_id(path),
+    )
+
+    if skip_verify:
+        click.secho("Skipping verification — credentials are unproven.", fg="yellow")
+    else:
+        # Register for real before writing anything. The orchestrator is the only
+        # thing that can tell a good secret from a typo, and finding out now beats
+        # finding out from a failed service start.
+        click.echo(f"Verifying with {cfg.orchestrator_url} ...")
+        from orvix_node.client import OrchestratorClient
+
+        try:
+            node_id = asyncio.run(OrchestratorClient(cfg).verify())
+        except AuthError as exc:
+            _fail(f"The orchestrator rejected these credentials: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            _fail(
+                f"Could not reach the orchestrator at {cfg.orchestrator_url}: {exc}\n"
+                "Check the URL and your network, or pass --skip-verify to write the "
+                "config anyway."
+            )
+        click.secho(f"Accepted as node {node_id}", fg="green")
+
+    _write_joined_config(path, cfg)
+    click.secho(f"Wrote {path}", fg="green")
+    click.echo("\nNext:")
+    click.echo("  orvix-node start          # run it now")
+    click.echo("  systemctl start orvix-node  # if the installer set up the service")
