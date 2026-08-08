@@ -1,4 +1,4 @@
-"""Exercise the top-up / payment flow (Prompt 6).
+"""Exercise the top-up / payment flow.
 
 Two modes:
 
