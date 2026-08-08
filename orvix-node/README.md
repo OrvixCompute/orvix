@@ -4,8 +4,9 @@ A Python agent that runs on a GPU provider's machine. It connects to the Orvix
 Orchestrator over WebSocket, registers its GPU, receives inference jobs, runs
 them, and returns results — earning USDC for the provider.
 
-Inference is **mocked by default**, so the entire pipeline runs on any machine.
-Real GPU inference (vLLM) is a one-file swap once you have a CUDA GPU (Prompt 7).
+Inference is **mocked by default**, so the whole pipeline runs on a machine with
+no GPU at all. Set `backend: "vllm"` to serve real traffic — that path is live,
+and image generation runs alongside it on the same card.
 
 ## Hardware requirements
 
@@ -138,7 +139,7 @@ git ref if you need one before then.
 | `protocol.py` | Wire messages — **kept identical with the orchestrator** |
 | `client.py` | WebSocket connection, register, heartbeat, reconnect |
 | `executor.py` | Concurrency-limited job execution + metrics |
-| `inference/` | `base` interface, `mock` (now), `vllm` (Prompt 7) |
+| `inference/` | `base` interface, `mock` (default), `vllm` (real inference) |
 | `health.py` | Local FastAPI health/metrics server |
 | `state.py` | Singleton runtime state |
 
@@ -168,7 +169,11 @@ ORVIX_NODE_STUB_GPU=true python test_connection.py
 - **Auth failed (exit 2)** — check `provider_id` / `node_secret` against the
   orchestrator's `/v1/provider/register`.
 
-## Roadmap
+## Status
 
-- Prompt 5–6: orchestrator routes real jobs to nodes; provider earnings/withdrawals.
-- Prompt 7: real vLLM inference (replace the mock backend).
+Job routing, provider earnings and USDC withdrawals are live, and vLLM inference
+and image generation both run in production. Providers are paid a share of each
+job they serve.
+
+Staking is disabled during alpha, so the provider stake requirement is not
+enforced yet. Expect breaking changes.

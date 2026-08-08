@@ -31,8 +31,8 @@ cp .env.example .env
 
 Fill in at least `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, and `JWT_SECRET`.
 Generate a secret with `openssl rand -hex 32`. The Solana/Helius vars are only
-needed for the Prompt 6 payment listener (leave `ENABLE_PAYMENT_LISTENER=false`
-until then).
+needed for the payment listener (leave `ENABLE_PAYMENT_LISTENER=false` until a
+treasury wallet is configured).
 
 ## 3. Set up the database
 
@@ -91,7 +91,7 @@ python test_auth.py
 # Call the inference API like an OpenAI client:
 python test_openai_client.py
 
-# Simulate / inspect the payment flow (Prompt 6):
+# Simulate / inspect the payment flow:
 python test_payment.py --help
 ```
 
@@ -175,8 +175,14 @@ The DB-backed manual version is `scripts/test_node_integration.py`.
 
 ## Roadmap
 
-- Frontend (Next.js dashboard)
-- Real vLLM inference on the node (orvix-node Prompt 7, needs a GPU)
-- Move nonce store + rate limiter to Redis
-- Real (non-stubbed) on-chain payouts with the treasury keypair
-- Deployment to VPS
+Shipped since this list was written: vLLM inference and image generation on the
+node, on-chain USDC payouts from the treasury, the payment listener crediting
+top-ups, and the VPS deployment.
+
+Still open:
+
+- Frontend dashboard (separate repository)
+- Move the rate limiter to Redis — it is in-process, so limits reset on restart
+  and do not hold across workers
+- Buyback and burn (engine merged, flags off)
+- Re-enable the provider stake requirement, disabled during alpha

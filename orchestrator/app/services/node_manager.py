@@ -422,7 +422,7 @@ class NodeManager:
         if pending and pending.future is not None and not pending.future.done():
             pending.future.set_result(msg)
 
-    # --- provider settlement (Prompt 6) ------------------------------------
+    # --- provider settlement -----------------------------------------------
     async def settle_job(self, node: NodeConnection, cost_usdc: Decimal) -> Decimal:
         """Credit the provider their share of a completed job's cost.
 
