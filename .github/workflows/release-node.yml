@@ -1,0 +1,91 @@
+name: Release orvix-node
+
+# Publishes the node package to PyPI when a `node-v*` tag is pushed.
+#
+# The prefix is deliberate. This repository already tags its own releases as
+# `v0.2.0`, and the node package has a separate version line — the two shared a
+# number once without sharing a meaning. `node-v0.2.1` says which artefact moved.
+#
+# Uses PyPI Trusted Publishing (OIDC): PyPI trusts this repository, workflow file
+# and environment, so no API token exists to leak. That is the whole point — the
+# first release was published with a token that had been pasted into a chat
+# window, and the fix for that class of mistake is not having a token at all.
+#
+# One-time setup on PyPI (pypi.org/manage/project/orvix-node/settings/publishing):
+#   Owner: OrvixCompute   Repository: orvix
+#   Workflow: release-node.yml   Environment: pypi
+
+on:
+  push:
+    tags:
+      - "node-v*"
+  # Lets a release be re-attempted without moving the tag, e.g. after a PyPI
+  # outage. Publishing the same version twice is refused by PyPI, so this cannot
+  # overwrite anything.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Verify the tag matches the package version
+        # A tag that disagrees with version.py would publish a version nobody
+        # asked for, under a name nobody could predict. PyPI never lets that be
+        # taken back, so it is worth failing here instead.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#node-v}"
+          PKG=$(python -c "import re,pathlib; \
+            print(re.search(r'__version__ = \"([^\"]+)\"', \
+            pathlib.Path('orvix-node/orvix_node/version.py').read_text()).group(1))")
+          echo "tag=$TAG  version.py=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag node-v$TAG does not match version.py ($PKG)."
+            exit 1
+          fi
+
+      - name: Build
+        working-directory: orvix-node
+        run: python -m build
+
+      - name: Check metadata
+        working-directory: orvix-node
+        run: twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: orvix-node/dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Named environment so the trusted publisher can be scoped to it, and so a
+    # protection rule can require approval before anything reaches PyPI.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/orvix-node/
+    permissions:
+      # Required for Trusted Publishing. Nothing else needs write access.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
