@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = Field("HS256", description="JWT signing algorithm")
     JWT_EXPIRY_HOURS: int = Field(24, description="JWT lifetime in hours")
 
-    # --- Solana / billing (optional until Prompt 6) ------------------------
+    # --- Solana / billing (optional until the payment listener is on) ------
     TREASURY_WALLET_ADDRESS: str = Field("", description="Treasury wallet that receives USDC deposits")
     USDC_MINT_ADDRESS: str = Field("", description="SPL mint address of the USDC token")
     ORVX_MINT_ADDRESS: str = Field("", description="SPL mint address of the ORVX token (staking deposits)")
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         False, description="Start the Solana payment listener on app startup"
     )
 
-    # --- Provider / payouts (Prompt 6) -------------------------------------
+    # --- Provider / payouts ------------------------------------------------
     PROVIDER_REWARD_PERCENTAGE: int = Field(
         70, description="Percentage of a job's cost paid to the provider"
     )
