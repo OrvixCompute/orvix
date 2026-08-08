@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orvix-node"
-version = "0.1.0"
+# Read from orvix_node/version.py, which already calls itself the single source
+# of truth. It was not: this file carried its own copy, and the two stayed in
+# step only by luck. A drifted pair means the node reports one version at
+# registration and ships another to PyPI.
+dynamic = ["version"]
 description = "Orvix Node Software — run GPU compute for the Orvix decentralized AI network."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -63,6 +67,9 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 orvix-node = "orvix_node.cli:cli"
+
+[tool.setuptools.dynamic]
+version = { attr = "orvix_node.version.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["orvix_node*"]
