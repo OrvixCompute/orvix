@@ -23,13 +23,10 @@ from orvix_node.inference.router import models_for_engine
 from orvix_node.version import __version__
 
 
-# orvix-node is not on PyPI, so `pip install orvix-node[gpu]` — what these
-# messages used to suggest — fails with "no matching distribution". Point at the
-# repository the installer actually uses.
-GPU_EXTRA_INSTALL = (
-    'pip install --upgrade "orvix-node[gpu] @ '
-    'git+https://github.com/OrvixCompute/orvix.git@main#subdirectory=orvix-node"'
-)
+# Was a git URL while orvix-node was unpublished; it is on PyPI now, so the
+# hint someone reads at the moment they are already stuck can be short enough to
+# retype from memory.
+GPU_EXTRA_INSTALL = 'pip install --upgrade "orvix-node[gpu]"' 
 
 
 def _fail(message: str, code: int = 1) -> None:
