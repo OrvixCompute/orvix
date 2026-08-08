@@ -143,3 +143,116 @@ def test_node_id_survives_an_unwritable_directory(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.write_text", _boom)
     cfg = load_config(config_file=path)
     assert cfg.node_id
+
+
+# --- join ------------------------------------------------------------------
+#
+# `join` exists to remove the hand-editing step provider onboarding required.
+# The two things worth pinning: it refuses to destroy an existing config, and a
+# rejected credential leaves nothing behind — a half-written config is worse
+# than none, because the next start reads it and fails somewhere less obvious.
+
+
+def _invoke_join(tmp_path, monkeypatch, args, verify=None):
+    from click.testing import CliRunner
+
+    import orvix_node.cli as cli_mod
+
+    cfg_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(cli_mod, "config_path", lambda: cfg_path)
+
+    if verify is not None:
+        class _Client:
+            def __init__(self, cfg):
+                self.cfg = cfg
+
+            async def verify(self):
+                return verify(self.cfg)
+
+        import orvix_node.client as client_mod
+
+        monkeypatch.setattr(client_mod, "OrchestratorClient", _Client)
+
+    return CliRunner().invoke(cli_mod.join, args), cfg_path
+
+
+def test_join_writes_a_config_after_verifying(tmp_path, monkeypatch):
+    seen = {}
+
+    def ok(cfg):
+        seen["provider_id"] = cfg.provider_id
+        seen["secret"] = cfg.node_secret
+        return "node-abc"
+
+    result, cfg_path = _invoke_join(
+        tmp_path, monkeypatch,
+        ["--provider-id", "prov-1", "--node-secret", "s3cret"],
+        verify=ok,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == {"provider_id": "prov-1", "secret": "s3cret"}
+    assert "node-abc" in result.output
+    body = cfg_path.read_text()
+    assert 'provider_id: "prov-1"' in body
+    assert 'node_secret: "s3cret"' in body
+
+
+def test_join_refuses_to_clobber_an_existing_config(tmp_path, monkeypatch):
+    result, cfg_path = _invoke_join(
+        tmp_path, monkeypatch, ["--provider-id", "p", "--node-secret", "s"],
+        verify=lambda c: "n",
+    )
+    assert result.exit_code == 0
+    original = cfg_path.read_text()
+
+    again, _ = _invoke_join(
+        tmp_path, monkeypatch, ["--provider-id", "other", "--node-secret", "other"],
+        verify=lambda c: "n",
+    )
+    assert again.exit_code != 0
+    assert "--force" in again.output
+    assert cfg_path.read_text() == original, "the existing config must be untouched"
+
+
+def test_join_writes_nothing_when_the_orchestrator_rejects(tmp_path, monkeypatch):
+    """A half-written config is worse than none: the next start would read it."""
+    from orvix_node.exceptions import AuthError
+
+    def rejected(cfg):
+        raise AuthError("Registration rejected: unknown provider")
+
+    result, cfg_path = _invoke_join(
+        tmp_path, monkeypatch, ["--provider-id", "bad", "--node-secret", "bad"],
+        verify=rejected,
+    )
+
+    assert result.exit_code != 0
+    assert "rejected" in result.output.lower()
+    assert not cfg_path.exists(), "no config may be left behind"
+
+
+def test_join_keeps_the_template_comments(tmp_path, monkeypatch):
+    """The file is something the provider edits later; a bare dump would strip
+    every explanation of what they can tune."""
+    result, cfg_path = _invoke_join(
+        tmp_path, monkeypatch, ["--provider-id", "p", "--node-secret", "s"],
+        verify=lambda c: "n",
+    )
+    assert result.exit_code == 0
+    body = cfg_path.read_text()
+    assert "#" in body
+    assert "heartbeat_interval" in body
+
+
+def test_join_config_is_not_world_readable(tmp_path, monkeypatch):
+    """It holds the node secret."""
+    import stat
+
+    result, cfg_path = _invoke_join(
+        tmp_path, monkeypatch, ["--provider-id", "p", "--node-secret", "s"],
+        verify=lambda c: "n",
+    )
+    assert result.exit_code == 0
+    mode = stat.S_IMODE(cfg_path.stat().st_mode)
+    assert mode & 0o077 == 0, f"config mode {oct(mode)} exposes the secret"
