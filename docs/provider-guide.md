@@ -44,9 +44,18 @@ provider incentives with the network.
    ORVX to the treasury with that memo. Your stake is credited automatically.
    Check `GET /v1/staking/status`.
 3. **Register** — `POST /v1/provider/register` succeeds once your stake ≥ 25,000.
+   During the alpha the check is skipped entirely (see the note at the top), so
+   registration succeeds with nothing staked.
 
 > If you unstake below 25,000 ORVX you must deregister as a provider first — the
 > unstake endpoint refuses to drop an active provider below the minimum.
+>
+> **This floor is live now, even though the registration gate is not.** The two
+> are controlled separately: `REQUIRE_STAKE_FOR_PROVIDER` only governs
+> registration, while the unstake check keys off `is_provider` alone. Registering
+> without a stake is unaffected — there is nothing to withdraw — but a provider
+> who *has* staked cannot drop back below 25,000 during the alpha either
+> (`400 provider_minimum_stake`).
 
 ## High-level steps
 

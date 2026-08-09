@@ -43,12 +43,17 @@ Next steps:
 ## For providers (run a node)
 
 A provider installs a lightweight agent that connects to the orchestrator over
-WebSocket and executes inference jobs on your GPU. **Heads-up:** becoming a
-provider requires staking **25,000 ORVX** in addition to eligible hardware — see
-the [Provider Guide](./provider-guide.md#provider-requirements).
+WebSocket and executes inference jobs on your GPU.
+
+**Staking is not required during the alpha.** The whitepaper sets a 25,000 ORVX
+minimum to register as a provider, but the gate is switched off
+(`REQUIRE_STAKE_FOR_PROVIDER=false`), so registration succeeds with nothing
+staked. Expect it to be enforced before the public testnet. See the
+[Provider Guide](./provider-guide.md#provider-requirements).
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/OrvixCompute/orvix/main/orvix-node/install.sh | bash
+orvix-node join     # paste the provider_id + node_secret you registered with
 orvix-node start
 ```
 
