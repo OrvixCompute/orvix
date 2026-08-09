@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Node package (PyPI)
+
+`orvix-node` has its own version line, separate from this repository's `v*` tags
+— they briefly shared a number without sharing a meaning. Published from a
+`node-v*` tag via PyPI Trusted Publishing, so no API token is involved.
+
+- **0.2.3** — no code change; releases the README that now documents the rule
+  below. Published because a tag that has already shipped must never be moved:
+  repointing one re-runs the release against a version PyPI already has and
+  fails with `400 File already exists`, which is PyPI refusing a filename it has
+  seen before — permanent, and deliberate
+- **0.2.2** — packaging metadata and the version read from `orvix_node/version.py`
+  as its single source
+- **0.2.1** — shorter GPU install hints
+- **0.2.0** — first release under the claimed `orvix-node` name, alongside
+  `orvix-node join`
+
 ### Added
 - **Tool / function calling** on `POST /v1/chat/completions` (non-streaming). `tools` and `tool_choice` are accepted in OpenAI's shape and forwarded untouched to the serving engine; a tool-calling turn comes back with `finish_reason: "tool_calls"`, `message.tool_calls`, and `message.content: null`, and `role: "tool"` result messages with a `tool_call_id` round-trip. `tools` with `stream: true` is refused with `400 streaming_tools_unsupported` rather than streaming prose and dropping the calls — streaming tool deltas need argument-fragment reassembly that is not implemented yet. Providers must start vLLM with `--enable-auto-tool-choice --tool-call-parser <parser>` (`hermes` for Qwen2.5) or the model ignores the tools and answers in prose
 - Node multi-engine architecture: `AbstractEngine` base with `ChatEngine`/`ImageEngine` families and a `model_id → engine_type` router (foundation for image generation)
@@ -47,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ModelManager` no longer holds its lock during the actual `load()`/`unload()` I/O — state transitions are decided and committed under the lock, but the slow work runs with it released. In concurrent mode this was a real bug: a ~60s image cold-load blocked *every* other request (including one for an already-resident, untouched chat engine) because the single lock covering the whole load spanned the entire I/O
 
 ### Fixed
+- **`POST /v1/provider/withdraw` accepted any authenticated JWT.** `is_provider` was written at registration and never read back, so the only thing between a non-provider and the payout path was `lock_withdrawal` refusing when `available_usdc` is short — a balance, not a role. It held only because non-providers happen to have zero, so any change that credited one would have opened the path. Gated on a new `get_current_provider` dependency, built on `get_current_user` so the JWT path is unchanged, returning **403 `not_a_provider`**
+- **The provider quick start in the README skipped `orvix-node join`.** Following it literally left `start` with no credentials to authenticate with. `join` is now shown as the required middle step, with a pointer to where `provider_id` and `node_secret` come from
+- **Every social channel the repo advertised was wrong.** The Discord invite was never set up, the Twitter/X handle 404s, and the Telegram link resolved to a stranger's personal account. Replaced with the real accounts across the README, CONTRIBUTING, CODE_OF_CONDUCT, the issue-template config, and the FAQ/tokenomics/governance docs — and the README now states plainly that there is no Discord, since unclaimed "official" channels are what impersonators fill
 - Migration `016_jobs_provider_id` records the provider on each job. `jobs` stored who ran the request and which node served it, but the provider was only reachable via `jobs → nodes → provider_id` — so deleting a node destroyed the attribution for every job it had served, including the `provider_earning_usdc` already booked against them. Node deletion is routine, and after `015` it nulls `jobs.node_id` by design, which severed the last link. `image_jobs` has stored `provider_id` directly since migration `010`; this brings the older table in line rather than inventing a new pattern. Existing rows are back-filled where the node row still resolves. The column and its constraint are added in **separate** statements, because a combined `add column if not exists … references …` is precisely what left `jobs.node_id` without a foreign key (see `015`)
 - Migration `015_jobs_node_fk` repairs the `jobs.node_id` foreign key, which has never existed in any database built from this migration set. `002_nodes.sql` wrote `alter table jobs add column if not exists node_id uuid references nodes(id) on delete set null`, but `001` had already created the column — so `add column if not exists` became a no-op and took the `REFERENCES` clause with it. Reproduced on a clean Postgres 16: after 001–014 there is no constraint on `jobs.node_id` and a job referencing a nonexistent node is accepted. The migration nulls references left dangling in the meantime, adds the constraint behind a `pg_constraint` guard so it stays re-runnable, and indexes the referencing column (Postgres indexes only the referenced side, and `ON DELETE SET NULL` has to find these rows on every node deletion)
 - Node identity is now stable across reconnects. `register_node()` minted a fresh `uuid4()` on every connection, so a single machine left an `offline` ghost row in `nodes` each time it restarted — one RTX A4500 was briefly reported to the public `GET /v1/network/stats` as "2 nodes, 40 GB VRAM". The node now generates an id once, caches it in a `node-id` file beside its config (not under `~`, which is the ephemeral layer on a container host), and sends it in `RegisterMessage`; the orchestrator reuses that row. The field is optional, so older nodes keep the previous per-connection behaviour, and a claimed id is honoured only when unused or already owned by the same provider — otherwise a provider could take over another provider's row along with its job history. New node config field `node_id` pins it explicitly
