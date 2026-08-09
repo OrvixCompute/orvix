@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 — they briefly shared a number without sharing a meaning. Published from a
 `node-v*` tag via PyPI Trusted Publishing, so no API token is involved.
 
+- **0.2.4** — `orvix-node join` rejects an unknown `--model` before contacting the
+  orchestrator, instead of accepting it and failing hours later at `start` with
+  `ValueError: Unknown model`. The error names the models the node can serve
 - **0.2.3** — no code change; releases the README that now documents the rule
   below. Published because a tag that has already shipped must never be moved:
   repointing one re-runs the release against a version PyPI already has and
