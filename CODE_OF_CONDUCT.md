@@ -59,8 +59,8 @@ account, or acting as an appointed representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the
 community leaders responsible for enforcement at **conduct@orvix.network** (or DM
-**@OrvixCompute** on Twitter). All complaints will be reviewed and investigated promptly and
-fairly.
+**[@Orvixhq](https://x.com/Orvixhq)** on X). All complaints will be reviewed and investigated
+promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any
 incident.
@@ -128,5 +128,5 @@ For answers to common questions about this code of conduct, see the FAQ at
 
 ---
 
-For Orvix-specific community spaces (Discord, Telegram, Twitter), this Code of Conduct applies
-in full.
+For Orvix-specific community spaces ([Telegram](https://t.me/Orvix_hq),
+[X](https://x.com/Orvixhq)), this Code of Conduct applies in full.

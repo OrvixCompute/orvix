@@ -6,6 +6,6 @@ contact_links:
   - name: Security Vulnerability
     url: https://github.com/OrvixCompute/orvix/security/advisories/new
     about: Report security issues privately (see SECURITY.md)
-  - name: Discord Community
-    url: https://discord.gg/orvix
-    about: Chat with the community (replace with actual invite when ready)
+  - name: Telegram Community
+    url: https://t.me/Orvix_hq
+    about: Chat with the community

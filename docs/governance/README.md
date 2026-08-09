@@ -18,7 +18,7 @@ balance at the proposal's snapshot block.
 
 ## Proposal lifecycle
 
-1. **Idea** — posted in Discord `#governance-discussion`.
+1. **Idea** — posted in the [Telegram group](https://t.me/Orvix_hq).
 2. **Refinement** — discussed for at least 24 hours, shaped into a formal proposal
    using a [template](./proposal-templates/).
 3. **Submission** — posted to Snapshot.

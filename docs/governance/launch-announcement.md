@@ -16,18 +16,18 @@
 > • 1-day delay, then 5-day vote
 > • Approved proposals executed within 30 days
 >
-> Discuss in Discord #governance-discussion before proposing.
+> Discuss in the Telegram group (t.me/Orvix_hq) before proposing.
 
 > v1 is off-chain signal voting; v2 moves on-chain. Full docs:
 > <link to docs/governance/README.md>
 
-## Discord announcement
+## Telegram announcement
 
 > **Orvix governance is live** 🗳️
 > Vote on network direction at https://snapshot.box/#/orvix — gasless, weighted
 > by your ORVX.
 > • Vote: any holder · Propose: 100k+ ORVX
-> • Flow: idea in #governance-discussion → Snapshot → 1d delay → 5d vote
+> • Flow: idea in the Telegram group → Snapshot → 1d delay → 5d vote
 > • Approved proposals executed within 30 days
 > Read first: <link to governance README>
 > First proposals: <list, if any>
