@@ -15,6 +15,11 @@ name: Release orvix-node
 #   Owner: OrvixCompute   Repository: orvix
 #   Workflow: release-node.yml   Environment: pypi
 
+# Tags are frozen once they publish. Moving one re-runs this workflow against a
+# version PyPI already has, which fails with `400 File already exists` — new
+# content needs a new version, not a repointed tag. `skip-existing` is left off
+# on purpose: it would turn that into a silent green run and hide the real
+# mistake, which is forgetting to bump `version.py`.
 on:
   push:
     tags:

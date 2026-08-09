@@ -125,6 +125,16 @@ The workflow refuses to publish if the tag disagrees with `version.py`. PyPI
 never lets a version be re-uploaded, so a mismatch is worth failing on rather
 than discovering afterwards.
 
+**Never move a tag that has already published.** Repointing `node-v0.2.2` at a
+newer commit re-runs the workflow, which rebuilds the same version and dies on
+`400 File already exists` — PyPI refuses a filename it has seen before, even
+after a deletion, and that is deliberate. This happened twice on 2026-08-08:
+the release at 08:58 succeeded and the two red runs after it were the same
+0.2.2 being re-uploaded, not a broken release. New content means a new version:
+bump `version.py`, merge, tag again. To re-attempt a release that genuinely
+failed (a PyPI outage, say), use the workflow's `workflow_dispatch` trigger
+rather than touching the tag.
+
 **Providers install the last *published* version.** A fix merged to `main` does
 not reach them until a release is cut — set `ORVIX_NODE_REF` to install from a
 git ref if you need one before then.
