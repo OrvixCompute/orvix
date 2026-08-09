@@ -89,7 +89,7 @@ async def register_provider(
     if body.display_name:
         update["email"] = current_user.get("email")  # display_name kept client-side for now
     db.table("users").update(update).eq("id", current_user["id"]).execute()
-    return SecretResponse(node_secret=secret)
+    return SecretResponse(provider_id=str(current_user["id"]), node_secret=secret)
 
 
 @router.post("/regenerate-secret", response_model=SecretResponse)
@@ -101,7 +101,7 @@ async def regenerate_secret(
     db.table("users").update({"provider_secret_hash": _hash_secret(secret)}).eq(
         "id", current_user["id"]
     ).execute()
-    return SecretResponse(node_secret=secret)
+    return SecretResponse(provider_id=str(current_user["id"]), node_secret=secret)
 
 
 # ---------------------------------------------------------------------------
