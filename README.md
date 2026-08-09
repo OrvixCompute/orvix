@@ -91,8 +91,14 @@ See [docs/api-reference.md](docs/api-reference.md) for the full endpoint list.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/OrvixCompute/orvix/main/orvix-node/install.sh | bash
+orvix-node join     # paste the provider_id + node_secret you registered with
 orvix-node start
 ```
+
+`join` is not optional — `start` has nothing to authenticate with until it has
+run. Credentials come from `POST /v1/provider/register`, called with a session
+token; the wallet key that authorizes it never touches the GPU machine. See
+[orvix-node/README.md](orvix-node/README.md).
 
 **For contributors (build from source):** see [orchestrator/README.md](orchestrator/README.md) and
 [orvix-node/README.md](orvix-node/README.md), plus [CONTRIBUTING.md](CONTRIBUTING.md).
