@@ -288,8 +288,21 @@ async def withdraw(
 ):
     destination = body.destination_wallet or current_user["wallet_address"]
     w = payout_service.queue_withdrawal(current_user["id"], body.amount, destination)
+    # Report what actually happens next rather than a fixed promise. The queue is
+    # drained by a worker on a known interval, so that number is knowable; whether
+    # a human has to act first is decided by queue_withdrawal and recorded on the
+    # row, so read it from there instead of re-deriving the threshold here.
+    needs_approval = bool((w.get("metadata") or {}).get("manual_approval_required"))
+    if needs_approval:
+        estimate = "awaiting manual review — no automatic payout will be attempted"
+    else:
+        minutes = max(1, round(settings.PAYOUT_INTERVAL_SECONDS / 60))
+        estimate = f"picked up by the payout worker within ~{minutes} min, then confirmed on-chain"
     return WithdrawResponse(
-        withdrawal_id=str(w["id"]), status="queued", estimated_completion="< 1 hour"
+        withdrawal_id=str(w["id"]),
+        status="queued",
+        estimated_completion=estimate,
+        requires_manual_approval=needs_approval,
     )
 
 

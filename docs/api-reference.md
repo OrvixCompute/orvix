@@ -408,7 +408,22 @@ Remove a node. Returns `204 No Content`.
 Return an earnings summary.
 
 ### `POST /v1/provider/withdraw`
-Request a withdrawal of accumulated earnings.
+Request a withdrawal of accumulated earnings. Requires a registered provider —
+returns `403 not_a_provider` otherwise. Minimum `MIN_WITHDRAW_AMOUNT_USDC`
+(1 USDC); `402 insufficient_balance` when it exceeds `available_to_withdraw`.
+
+```json
+{ "withdrawal_id": "…", "status": "queued",
+  "estimated_completion": "picked up by the payout worker within ~5 min, then confirmed on-chain",
+  "requires_manual_approval": false }
+```
+
+`estimated_completion` is descriptive, not a guarantee. Above
+`AUTO_APPROVE_MAX_USDC` the request is flagged for manual review and
+`requires_manual_approval` is `true` — **nothing drains that case
+automatically**, so no ETA is given. A withdrawal queued while the payout wallet
+is short of USDC fails before broadcast and the amount is refunded to
+`available_to_withdraw`.
 
 ### `GET /v1/provider/withdrawals`
 List withdrawal requests.

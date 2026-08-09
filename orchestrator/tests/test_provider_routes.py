@@ -198,3 +198,39 @@ def test_withdraw_refused_for_non_provider(monkeypatch):
         assert db._table("withdrawals").rows == []
     finally:
         app.dependency_overrides.clear()
+
+
+def test_withdraw_estimate_reflects_the_worker_interval(ctx, monkeypatch):
+    """The estimate must come from the worker's own cadence, not a fixed string."""
+    client, db, user = ctx
+    monkeypatch.setattr(payout_mod.settings, "PAYOUT_INTERVAL_SECONDS", 600)
+    r = client.post(
+        "/v1/provider/withdraw",
+        json={"amount": 200, "destination_wallet": VALID_WALLET},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["requires_manual_approval"] is False
+    assert "10 min" in body["estimated_completion"]
+
+
+def test_withdraw_above_auto_approve_promises_no_eta(ctx, monkeypatch):
+    """A withdrawal needing a human must not be given a countdown.
+
+    Nothing drains this case — it is flagged for manual review and no approval
+    endpoint exists — so the old fixed "< 1 hour" was telling the provider to
+    expect money that never moves.
+    """
+    client, db, user = ctx
+    monkeypatch.setattr(payout_mod.settings, "AUTO_APPROVE_MAX_USDC", 100.0)
+    r = client.post(
+        "/v1/provider/withdraw",
+        json={"amount": 200, "destination_wallet": VALID_WALLET},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["requires_manual_approval"] is True
+    assert "manual review" in body["estimated_completion"]
+    # The promise the old response made must not survive anywhere in this branch.
+    assert "hour" not in body["estimated_completion"]
+    assert "min" not in body["estimated_completion"]
