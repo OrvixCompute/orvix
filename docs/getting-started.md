@@ -33,6 +33,8 @@ and `GET /v1/account/tier`.
 
 Next steps:
 
+- [Using an API key](./api-keys.md) — how to create one, which models are
+  actually being served, quotas, and the errors worth handling.
 - Read [orchestrator/README.md](../orchestrator/README.md) for backend setup and
   how authentication / API keys work.
 - See the [API Reference](./api-reference.md) for every endpoint (including

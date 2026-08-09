@@ -5,6 +5,7 @@ This folder contains additional documentation for the Orvix project beyond the t
 ## Contents
 
 - [Getting Started](./getting-started.md) — first-time setup for developers and providers
+- [Using an API key](./api-keys.md) — create a key and make your first call
 - [API Reference](./api-reference.md) — full API endpoint documentation
 - [Provider Guide](./provider-guide.md) — running a node and earning rewards
 - [Tokenomics](./tokenomics.md) — ORVX token economy, tiers, buyback & burn
