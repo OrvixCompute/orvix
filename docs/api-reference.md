@@ -253,7 +253,9 @@ the listener credits your stake automatically.
 ### `POST /v1/staking/unstake`
 Unstake ORVX and queue a payout. **Auth: JWT.**
 Body: `{ "amount": <number>, "destination_wallet": <optional> }`. Providers cannot
-unstake below the 25,000 ORVX minimum (`400 provider_minimum_stake`).
+unstake below the 25,000 ORVX minimum (`400 provider_minimum_stake`). This floor
+is **not** suspended during the alpha — `REQUIRE_STAKE_FOR_PROVIDER` governs
+registration only, while this check keys off `is_provider` alone.
 
 ### `GET /v1/staking/status`
 Your current stake, derived tier, next tier, and stake history. **Auth: JWT.**
