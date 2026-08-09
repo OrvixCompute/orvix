@@ -11,8 +11,9 @@
 [![Protocol Sync](https://github.com/OrvixCompute/orvix/actions/workflows/protocol-sync.yml/badge.svg)](https://github.com/OrvixCompute/orvix/actions/workflows/protocol-sync.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Twitter](https://img.shields.io/badge/Twitter-%40OrvixCompute-1DA1F2.svg)](https://twitter.com/OrvixCompute)
-[![Discord](https://img.shields.io/badge/Discord-join-5865F2.svg)](https://discord.gg/orvix)
+[![PyPI](https://img.shields.io/pypi/v/orvix-node.svg?label=orvix-node)](https://pypi.org/project/orvix-node/)
+[![X](https://img.shields.io/badge/X-%40Orvixhq-000000.svg)](https://x.com/Orvixhq)
+[![Telegram](https://img.shields.io/badge/Telegram-Orvix__hq-26A5E4.svg)](https://t.me/Orvix_hq)
 
 Orvix is a decentralized network that connects AI developers with a community of GPU
 providers. Developers reach distributed compute through a single OpenAI-compatible API;
@@ -25,10 +26,10 @@ open, community-owned inference with no vendor lock-in.
 ## ⚡ Quick links
 
 - 🌐 Website — https://orvix.network
-- 📚 Documentation — https://docs.orvix.network *(placeholder)*
+- 📚 Documentation — https://orvix.network/docs
 - 🧩 API reference — [orchestrator/README.md](orchestrator/README.md)
+- 📦 Node package — [orvix-node on PyPI](https://pypi.org/project/orvix-node/)
 - 📄 Whitepaper — *coming soon*
-- 💬 [Discord](https://discord.gg/orvix) · [Twitter](https://twitter.com/OrvixCompute) · [Telegram](https://t.me/orvix)
 
 ## Architecture overview
 
@@ -144,9 +145,10 @@ have early users discover it the hard way. As of this release:
 - **Single-process scale.** Auth challenge nonces and API rate limits are held
   in-memory, so the orchestrator runs as a single worker for now. Multi-worker /
   horizontal scaling (Redis-backed state) comes when real traffic warrants it.
-- **Some endpoints and links are still placeholders.** `orvix.network` is live;
-  `docs.orvix.network` is not live yet, and `orvix-node` is not on PyPI — the
-  installer pulls it straight from this repository instead.
+- **Provider onboarding is not self-serve yet.** `orvix-node` is on PyPI and the
+  agent works, but the dashboard has no provider screen: `provider_id` and
+  `node_secret` still have to be obtained by calling `POST /v1/provider/register`
+  by hand with a session token.
 
 Expect breaking changes. Track progress in [CHANGELOG.md](CHANGELOG.md).
 
@@ -174,9 +176,15 @@ Found a security issue? Please see [SECURITY.md](SECURITY.md) — **do not open 
 
 Licensed under the [Apache License 2.0](LICENSE).
 
-## 🌐 Community
+## 🌐 Contact
 
-- Twitter — [@OrvixCompute](https://twitter.com/OrvixCompute)
-- Discord — [discord.gg/orvix](https://discord.gg/orvix)
-- Telegram — [t.me/orvix](https://t.me/orvix)
-- Newsletter — *signup coming soon*
+- X — [@Orvixhq](https://x.com/Orvixhq)
+- Telegram — [t.me/Orvix_hq](https://t.me/Orvix_hq)
+- Questions and bug reports — [GitHub Issues](https://github.com/OrvixCompute/orvix/issues)
+- Security — [security@orvix.network](mailto:security@orvix.network), see [SECURITY.md](SECURITY.md)
+- Anything else — [orvix.network/contact](https://orvix.network/contact)
+
+Those two accounts and this repository are the only official Orvix channels. **Orvix
+has no Discord**, and there is no other Telegram group — anything claiming otherwise
+is not us, so treat it as a scam, especially if it mentions a token, an airdrop, or
+asks you to connect a wallet.

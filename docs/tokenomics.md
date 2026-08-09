@@ -13,7 +13,8 @@ ORVX is the utility token that powers the Orvix network.
 - **Launch:** pump.fun
 
 > Always verify the official token mint address via the project's verified
-> Twitter / Discord. Never trust unverified sources.
+> accounts — [@Orvixhq](https://x.com/Orvixhq) on X or
+> [t.me/Orvix_hq](https://t.me/Orvix_hq) on Telegram. Never trust unverified sources.
 
 > 💵 **Payments are settled in USDC, not ORVX.** Developers fund their balance
 > and pay for inference in USDC, and providers are paid out in USDC. ORVX is the

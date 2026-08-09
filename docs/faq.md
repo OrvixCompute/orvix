@@ -39,7 +39,7 @@ Earnings accumulate in your account in USDC. You can withdraw to your Solana wal
 ## Token
 
 **Where can I get ORVX?**
-ORVX is launched on pump.fun. Check the official Twitter/Discord for the verified token mint address. Never trust unverified sources.
+ORVX is launched on pump.fun. Check the official [X account](https://x.com/Orvixhq) or [Telegram](https://t.me/Orvix_hq) for the verified token mint address. Never trust unverified sources.
 
 **Is ORVX a security?**
 ORVX is a utility token used for pricing-tier discounts, staking nodes, and governance participation — compute itself is paid for in USDC. Nothing in our docs constitutes investment advice or guarantees of returns.
@@ -80,4 +80,4 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md). All types of contributions welcome.
 
 ## More questions?
 
-Open a [GitHub Discussion](https://github.com/OrvixCompute/orvix/discussions) or reach out on [Discord](https://discord.gg/orvix) (link coming soon).
+Open a [GitHub issue](https://github.com/OrvixCompute/orvix/issues) or reach out on [Telegram](https://t.me/Orvix_hq).

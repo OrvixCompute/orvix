@@ -132,9 +132,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a deep dive.
 
 ## Communication
 
-- [GitHub Discussions](https://github.com/OrvixCompute/orvix/discussions)
-- Discord — [discord.gg/orvix](https://discord.gg/orvix) *(placeholder)*
-- Twitter — [@OrvixCompute](https://twitter.com/OrvixCompute)
+- [GitHub Issues](https://github.com/OrvixCompute/orvix/issues)
+- Telegram — [t.me/Orvix_hq](https://t.me/Orvix_hq)
+- X — [@Orvixhq](https://x.com/Orvixhq)
 
 Asking questions is welcome — we'd rather answer ten "beginner" questions than have you
 struggle silently.
