@@ -388,9 +388,11 @@ off during the alpha (`REQUIRE_STAKE_FOR_PROVIDER=false`).
 ```
 
 ### `POST /v1/provider/regenerate-secret`
-Rotate the provider's node secret. Returns the same pair. The old secret stops
-working immediately, so any node still running on it drops at its next
-reconnect and needs `orvix-node join --force`.
+Rotate the provider's node secret. Returns the same pair. Requires a registered
+provider — returns `403 not_a_provider` otherwise, since the hash it writes is
+the credential a node authenticates with. The old secret stops working
+immediately, so any node still running on it drops at its next reconnect and
+needs `orvix-node join --force`.
 
 ### `GET /v1/provider/nodes`
 List the provider's nodes.

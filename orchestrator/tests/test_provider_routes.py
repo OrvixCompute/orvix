@@ -234,3 +234,28 @@ def test_withdraw_above_auto_approve_promises_no_eta(ctx, monkeypatch):
     # The promise the old response made must not survive anywhere in this branch.
     assert "hour" not in body["estimated_completion"]
     assert "min" not in body["estimated_completion"]
+
+
+def test_regenerate_secret_refused_for_non_provider(monkeypatch):
+    """Minting a node secret must not be a way around registration.
+
+    The hash this writes is the credential a node authenticates with, so a
+    non-provider who could rotate one would hold a working provider credential
+    without ever passing through register — the step that records consent and
+    carries the stake gate.
+    """
+    db = FakeSupabase()
+    user = db.add_user(is_provider=False, provider_secret_hash=None)
+    app.dependency_overrides[get_supabase] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: user
+    monkeypatch.setattr(payout_mod, "get_supabase", lambda: db)
+    client = TestClient(app)
+    try:
+        r = client.post("/v1/provider/regenerate-secret", json={})
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "not_a_provider"
+        # No credential was written.
+        row = next(x for x in db._table("users").rows if x["id"] == user["id"])
+        assert row.get("provider_secret_hash") is None
+    finally:
+        app.dependency_overrides.clear()
