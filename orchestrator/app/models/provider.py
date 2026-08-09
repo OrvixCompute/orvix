@@ -28,4 +28,8 @@ class ProviderRegisterRequest(BaseModel):
 
 
 class SecretResponse(BaseModel):
+    # `orvix-node join` needs BOTH values, but this response used to carry only
+    # the secret — the id is `users.id`, handed back at login and nowhere else.
+    # A provider following the docs got one of the two credentials and stalled.
+    provider_id: str
     node_secret: str

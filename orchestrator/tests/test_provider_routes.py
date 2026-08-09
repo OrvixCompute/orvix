@@ -30,11 +30,17 @@ def ctx(monkeypatch):
     app.dependency_overrides.clear()
 
 
-def test_register_returns_secret(ctx):
+def test_register_returns_both_credentials(ctx):
+    """`orvix-node join` needs the id as well as the secret, so both must ship.
+
+    Returning only the secret stalled onboarding: the id is `users.id`, which
+    the register response never carried.
+    """
     client, db, user = ctx
     resp = client.post("/v1/provider/register", json={"display_name": "My Rig"})
     assert resp.status_code == 200
     assert resp.json()["node_secret"]
+    assert resp.json()["provider_id"] == str(user["id"])
     row = next(r for r in db._table("users").rows if r["id"] == user["id"])
     assert row["is_provider"] is True
     assert row["provider_secret_hash"]
@@ -89,9 +95,11 @@ def test_regenerate_secret_changes_hash(ctx):
     client, db, user = ctx
     client.post("/v1/provider/register", json={})
     first = next(r for r in db._table("users").rows if r["id"] == user["id"])["provider_secret_hash"]
-    client.post("/v1/provider/regenerate-secret", json={})
-    second = next(r for r in db._table("users").rows if r["id"] == user["id"])["provider_secret_hash"]
+    r = client.post("/v1/provider/regenerate-secret", json={})
+    second = next(r2 for r2 in db._table("users").rows if r2["id"] == user["id"])["provider_secret_hash"]
     assert first != second
+    # Rotating hands back a full credential pair too, so `join` works after a rotation.
+    assert r.json()["provider_id"] == str(user["id"])
 
 
 def test_list_and_rename_node(ctx):

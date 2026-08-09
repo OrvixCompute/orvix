@@ -371,12 +371,21 @@ ORVX held for burn, total burned, and last burn.
 All require **Auth: JWT.**
 
 ### `POST /v1/provider/register`
-Register the current account as a provider. Returns a node secret used by the
-node agent to authenticate. **Requires a stake of at least 25,000 ORVX** — returns
-`400 insufficient_stake` otherwise. Stake first via `POST /v1/staking/stake-intent`.
+Register the current account as a provider. Returns `provider_id` and
+`node_secret` — the pair `orvix-node join` asks for. The secret is shown once
+and stored only as a hash, so a lost secret is rotated, not recovered.
+**Requires a stake of at least 25,000 ORVX** — returns `400 insufficient_stake`
+otherwise. Stake first via `POST /v1/staking/stake-intent`. The stake gate is
+off during the alpha (`REQUIRE_STAKE_FOR_PROVIDER=false`).
+
+```json
+{ "provider_id": "…", "node_secret": "…" }
+```
 
 ### `POST /v1/provider/regenerate-secret`
-Rotate the provider's node secret.
+Rotate the provider's node secret. Returns the same pair. The old secret stops
+working immediately, so any node still running on it drops at its next
+reconnect and needs `orvix-node join --force`.
 
 ### `GET /v1/provider/nodes`
 List the provider's nodes.
