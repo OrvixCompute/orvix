@@ -63,6 +63,13 @@ class UnauthorizedError(OrvixException):
     error_code = "unauthorized"
 
 
+class ForbiddenError(OrvixException):
+    """The caller is authenticated but not permitted to perform this action."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    error_code = "forbidden"
+
+
 class InsufficientBalanceError(OrvixException):
     """The user does not have enough balance for this operation."""
 
