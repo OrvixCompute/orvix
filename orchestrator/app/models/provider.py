@@ -20,7 +20,15 @@ class WithdrawRequest(BaseModel):
 class WithdrawResponse(BaseModel):
     withdrawal_id: str
     status: str
+    # Was the hardcoded string "< 1 hour" on every response, which was false in
+    # the one case that matters: a withdrawal above AUTO_APPROVE_MAX_USDC is
+    # flagged for manual review, and no approval endpoint exists — so it sits
+    # queued indefinitely while the caller was told to expect it within the hour.
+    # Now describes the actual next step, derived from the worker's own interval.
     estimated_completion: str
+    # Lets a client say "this needs a human" instead of showing a countdown that
+    # will never run out.
+    requires_manual_approval: bool = False
 
 
 class ProviderRegisterRequest(BaseModel):
