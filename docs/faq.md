@@ -28,7 +28,7 @@ Per token (input + output), with discounts based on your **staked** ORVX tier (u
 At minimum: NVIDIA GPU with 8GB VRAM, CUDA 11+. Recommended: 16GB+ VRAM (RTX 3090/4090, A4000+).
 
 **What do I need to become a provider?**
-Eligible hardware, a Solana wallet, and — once the alpha ends — a stake of at least **25,000 ORVX**. **That stake gate is currently switched off** (`REQUIRE_STAKE_FOR_PROVIDER=false`), so registration succeeds today with nothing staked. Expect it to be enforced before the public testnet. See the [Provider Guide](./provider-guide.md#provider-requirements).
+Eligible hardware, a Solana wallet, and — once the alpha ends — a stake of at least **2,000,000 ORVX**. **That stake gate is currently switched off** (`REQUIRE_STAKE_FOR_PROVIDER=false`), so registration succeeds today with nothing staked. Expect it to be enforced before the public testnet. See the [Provider Guide](./provider-guide.md#provider-requirements).
 
 **How much can I earn?**
 Providers receive 70% of the revenue from requests they serve (the platform takes 30%). Actual earnings depend on uptime, model demand, and number of competing nodes.
@@ -47,13 +47,13 @@ ORVX is a utility token used for pricing-tier discounts, staking nodes, and gove
 ## Staking, buybacks & burns
 
 **How does staking work?**
-You stake ORVX by sending it (with a memo from `POST /v1/staking/stake-intent`) to the treasury, which credits your staked balance. Staking does two things: it sets your pricing tier, and it will gate provider registration at 25,000 ORVX once that requirement is switched on — during the alpha it is off, so staking today only affects your tier. Staking is custodial in v1 and moving on-chain in v2.
+You stake ORVX by sending it (with a memo from `POST /v1/staking/stake-intent`) to the treasury, which credits your staked balance. Staking does two things: it sets your pricing tier, and it will gate provider registration at 2,000,000 ORVX once that requirement is switched on — during the alpha it is off, so staking today only affects your tier. Staking is custodial in v1 and moving on-chain in v2.
 
 **What's the difference between staking and holding ORVX?**
 Holding is just having ORVX in your wallet. Staking locks ORVX into custody to unlock utility — provider eligibility and tier discounts are based on **staked** ORVX, not what's in your wallet.
 
 **How can I unstake my ORVX?**
-Call `POST /v1/staking/unstake`. The amount is debited and a payout is queued to your wallet. Providers cannot unstake below the 25,000 ORVX minimum without deregistering first — and note this floor applies **even during the alpha**, unlike the registration gate. So if you register without staking you are unaffected, but once you have staked as a provider, dropping back below 25,000 is refused with `400 provider_minimum_stake`.
+Call `POST /v1/staking/unstake`. The amount is debited and a payout is queued to your wallet. Providers cannot unstake below the 2,000,000 ORVX minimum without deregistering first — and note this floor applies **even during the alpha**, unlike the registration gate. So if you register without staking you are unaffected, but once you have staked as a provider, dropping back below 2,000,000 is refused with `400 provider_minimum_stake`.
 
 **When are buybacks executed?**
 50% of the platform fee accumulates as a buyback budget. Buybacks are executed manually by the team (USDC→ORVX via Jupiter). See `GET /v1/staking/buyback-history`.

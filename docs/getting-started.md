@@ -45,7 +45,7 @@ Next steps:
 A provider installs a lightweight agent that connects to the orchestrator over
 WebSocket and executes inference jobs on your GPU.
 
-**Staking is not required during the alpha.** The whitepaper sets a 25,000 ORVX
+**Staking is not required during the alpha.** The whitepaper sets a 2,000,000 ORVX
 minimum to register as a provider, but the gate is switched off
 (`REQUIRE_STAKE_FOR_PROVIDER=false`), so registration succeeds with nothing
 staked. Expect it to be enforced before the public testnet. See the

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.database import get_supabase
 from app.dependencies import get_current_user
 from app.main import app
+from app.services import staking_service as staking_mod
 from app.services import tier_service
 from app.services.payment_listener import PaymentListener
 from tests.fakes import FakeSupabase
@@ -86,9 +87,12 @@ def test_status_reports_tier_and_history(ctx):
 
 
 # --- unstaking -------------------------------------------------------------
-def test_unstake_with_sufficient_balance(ctx):
+def test_unstake_with_sufficient_balance(ctx, monkeypatch):
     client, db, user = ctx
-    # Stays above the 25K provider floor: 50K -> 25K.
+    # Pin the floor rather than assume it: this asserts behaviour above the
+    # provider minimum, not whatever the minimum currently happens to be.
+    monkeypatch.setattr(staking_mod.settings, "PROVIDER_MIN_STAKE_ORVX", 25000)
+    # Stays above the floor: 50K -> 25K.
     resp = client.post(
         "/v1/staking/unstake", json={"amount": 25000, "destination_wallet": VALID_WALLET}
     )
@@ -104,9 +108,10 @@ def test_unstake_with_sufficient_balance(ctx):
     assert w["metadata"]["manual_approval_required"] is True
 
 
-def test_unstake_rejected_below_provider_minimum(ctx):
+def test_unstake_rejected_below_provider_minimum(ctx, monkeypatch):
     client, db, user = ctx
-    # 50K - 30K = 20K < 25K minimum.
+    monkeypatch.setattr(staking_mod.settings, "PROVIDER_MIN_STAKE_ORVX", 25000)
+    # 50K - 30K = 20K, below the pinned floor.
     resp = client.post(
         "/v1/staking/unstake", json={"amount": 30000, "destination_wallet": VALID_WALLET}
     )

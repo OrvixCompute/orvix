@@ -90,8 +90,15 @@ class Settings(BaseSettings):
         False,
         description="When false (alpha), provider register skips the staked_orvx minimum check",
     )
+    # 0.2% of the fixed 1,000,000,000 supply. Operator's number, set while the
+    # token is early and the stake is cheap in dollar terms; the intent is to
+    # revisit it as market cap grows. Worth knowing what it implies: a per-provider
+    # minimum caps how many providers the supply can ever seat — 0.2% means 500 at
+    # 100% of supply staked, and realistically a few hundred. Lowering it later
+    # cannot claw back stake already locked by early providers, so a reduction is
+    # the easy direction and a rise is the one that strands people.
     PROVIDER_MIN_STAKE_ORVX: int = Field(
-        25000, description="Minimum ORVX a user must stake to register as a provider"
+        2_000_000, description="Minimum ORVX a user must stake to register as a provider"
     )
     STAKE_INTENT_TTL_MINUTES: int = Field(
         30, description="How long a staking intent (and its memo) stays valid"

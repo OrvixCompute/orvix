@@ -31,9 +31,18 @@ balance. Billing logic is in place today; real on-chain settlement is being
 finalized alongside live inference.
 
 ### Node staking
-Providers must stake at least **25,000 ORVX** to register and run nodes. Staking
-is **custodial (off-chain ledger) in v1**, moving **on-chain in v2**. Stake is
-deposited via a memo'd transfer to the treasury and credited automatically.
+Providers must stake at least **2,000,000 ORVX** — **0.2% of the fixed
+1,000,000,000 supply** — to register and run nodes. Staking is **custodial
+(off-chain ledger) in v1**, moving **on-chain in v2**. Stake is deposited via a
+memo'd transfer to the treasury and credited automatically.
+
+The figure is set while the token is early and the stake is inexpensive in
+dollar terms, and is expected to be revisited as market cap grows — it is a
+configuration value (`PROVIDER_MIN_STAKE_ORVX`), not a protocol constant. Two
+consequences are worth stating plainly: a per-provider minimum of 0.2% means the
+supply can seat at most 500 providers even if every token were staked, and since
+the barrier is denominated in ORVX rather than dollars, its real cost moves with
+the price without anyone changing the setting.
 
 > ⚠️ **Stake requirement currently suspended for the alpha phase**
 > (`REQUIRE_STAKE_FOR_PROVIDER=false`). Providers can register without staking

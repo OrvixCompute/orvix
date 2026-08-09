@@ -12,7 +12,7 @@ the requests you serve.
 
 ## Current Status (Alpha)
 
-> 🟢 **During the alpha phase, the 25,000 ORVX stake requirement is suspended.**
+> 🟢 **During the alpha phase, the 2,000,000 ORVX stake requirement is suspended.**
 > Providers can register **without staking** (the orchestrator runs with
 > `REQUIRE_STAKE_FOR_PROVIDER=false`). The stake requirement will activate before
 > public testnet — early providers will be **grandfathered** or given time to
@@ -33,9 +33,9 @@ To run a node you need eligible **hardware** and (post-alpha) a **stake**.
 > No GPU yet? The node ships with a **stub mode** (`ORVIX_NODE_STUB_GPU=true`)
 > so you can develop and test the full flow without hardware.
 
-### Stake: 25,000 ORVX
+### Stake: 2,000,000 ORVX
 
-Provider registration requires at least **25,000 ORVX staked**. This aligns
+Provider registration requires at least **2,000,000 ORVX staked**. This aligns
 provider incentives with the network.
 
 1. **Acquire ORVX** — on pump.fun or a Solana DEX (verify the mint address from
@@ -43,18 +43,18 @@ provider incentives with the network.
 2. **Stake it** — call `POST /v1/staking/stake-intent` for a memo, then send the
    ORVX to the treasury with that memo. Your stake is credited automatically.
    Check `GET /v1/staking/status`.
-3. **Register** — `POST /v1/provider/register` succeeds once your stake ≥ 25,000.
+3. **Register** — `POST /v1/provider/register` succeeds once your stake ≥ 2,000,000.
    During the alpha the check is skipped entirely (see the note at the top), so
    registration succeeds with nothing staked.
 
-> If you unstake below 25,000 ORVX you must deregister as a provider first — the
+> If you unstake below 2,000,000 ORVX you must deregister as a provider first — the
 > unstake endpoint refuses to drop an active provider below the minimum.
 >
 > **This floor is live now, even though the registration gate is not.** The two
 > are controlled separately: `REQUIRE_STAKE_FOR_PROVIDER` only governs
 > registration, while the unstake check keys off `is_provider` alone. Registering
 > without a stake is unaffected — there is nothing to withdraw — but a provider
-> who *has* staked cannot drop back below 25,000 during the alpha either
+> who *has* staked cannot drop back below 2,000,000 during the alpha either
 > (`400 provider_minimum_stake`).
 
 ## High-level steps
