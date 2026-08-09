@@ -370,6 +370,11 @@ ORVX held for burn, total burned, and last burn.
 
 All require **Auth: JWT.**
 
+> `POST /v1/auth/me` returns the caller's user record, including
+> **`is_provider`** — the flag the dashboard needs to decide whether to offer
+> registration or the provider view. It cannot be probed any other way: the only
+> endpoint gated by it queues a payout.
+
 ### `POST /v1/provider/register`
 Register the current account as a provider. Returns `provider_id` and
 `node_secret` — the pair `orvix-node join` asks for. The secret is shown once

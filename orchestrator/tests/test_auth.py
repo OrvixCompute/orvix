@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from solders.keypair import Keypair
 
 from app.database import get_supabase
+from app.dependencies import get_current_user
 from app.exceptions import UnauthorizedError, ValidationError
 from app.main import app
 from app.services.auth_service import AuthService, auth_service
@@ -182,3 +183,25 @@ def test_challenge_endpoint_round_trips_to_a_jwt(ctx):
     assert resp.status_code == 200
     assert resp.json()["token"]
     assert db._table("auth_challenges").rows == []
+
+
+# --- provider status is visible to the dashboard ---------------------------
+def test_me_exposes_is_provider(ctx):
+    """The dashboard decides what to render from this flag.
+
+    It used to be underivable: the flag lived only on the user row, and the one
+    endpoint gated by it (POST /v1/provider/withdraw) queues a payout, so it
+    could not be probed. Both states are asserted, because defaulting the field
+    to False would make a one-sided test pass while telling every provider they
+    are not one.
+    """
+    client, db = ctx
+    for is_provider in (True, False):
+        user = db.add_user(is_provider=is_provider)
+        app.dependency_overrides[get_current_user] = lambda u=user: u
+        try:
+            body = client.post("/v1/auth/me").json()
+            assert body["is_provider"] is is_provider
+            assert body["id"] == str(user["id"])
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)

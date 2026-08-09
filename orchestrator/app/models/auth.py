@@ -32,6 +32,12 @@ class User(BaseModel):
     wallet: str
     tier: str
     balance_usdc: Decimal
+    # The dashboard has to know whether this account is already a provider in
+    # order to decide what to show. It used to be underivable: the flag lived
+    # only on the user row, and the one endpoint gated by it (POST /withdraw)
+    # queues a payout, so it could not be used as a probe. The UI was left
+    # inferring the answer from whether nodes or earnings happened to exist.
+    is_provider: bool = False
 
     @classmethod
     def from_row(cls, row: dict) -> "User":
@@ -40,6 +46,7 @@ class User(BaseModel):
             wallet=row["wallet_address"],
             tier=row["tier"],
             balance_usdc=Decimal(str(row.get("balance_usdc", 0))),
+            is_provider=bool(row.get("is_provider", False)),
         )
 
 
