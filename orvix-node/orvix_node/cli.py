@@ -487,6 +487,20 @@ def join(provider_id, node_secret, orchestrator_url, model, force, skip_verify) 
         node_id=resolve_node_id(path),
     )
 
+    # Check the model before anything else. The router raises on an unknown id,
+    # but only when `start` loads an engine — so a typo used to sail through
+    # `join`, print "Accepted", write the config, and surface hours later as a
+    # service that will not boot. Nothing here needs the network, so it is the
+    # cheapest failure available and belongs first.
+    from orvix_node.inference.router import MODEL_TO_ENGINE
+
+    if cfg.model not in MODEL_TO_ENGINE:
+        _fail(
+            f"Unknown model {cfg.model!r}. This node can serve: "
+            + ", ".join(sorted(MODEL_TO_ENGINE))
+            + ".\nPass one with --model, or upgrade orvix-node if you expected a newer one."
+        )
+
     if skip_verify:
         click.secho("Skipping verification — credentials are unproven.", fg="yellow")
     else:

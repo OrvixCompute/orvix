@@ -256,3 +256,47 @@ def test_join_config_is_not_world_readable(tmp_path, monkeypatch):
     assert result.exit_code == 0
     mode = stat.S_IMODE(cfg_path.stat().st_mode)
     assert mode & 0o077 == 0, f"config mode {oct(mode)} exposes the secret"
+
+
+def test_join_rejects_an_unknown_model_before_touching_the_network(tmp_path, monkeypatch):
+    """A typo'd model must fail here, not hours later at `start`.
+
+    The router raises on an unknown id, but only when `start` loads an engine —
+    so `join` used to print "Accepted", write the config, and leave a service
+    that cannot boot. `verify` is deliberately wired to explode: reaching it at
+    all would mean the check ran too late to be the cheap one.
+    """
+    def must_not_run(cfg):
+        raise AssertionError("verify() ran despite an unknown model")
+
+    result, cfg_path = _invoke_join(
+        tmp_path, monkeypatch,
+        ["--provider-id", "p", "--node-secret", "s", "--model", "does-not-exist"],
+        verify=must_not_run,
+    )
+
+    assert result.exit_code != 0
+    assert "does-not-exist" in result.output
+    # The message has to name the alternatives, or the provider is left guessing.
+    assert "qwen-2.5-7b" in result.output
+    # Nothing written: a half-configured node is worse than none.
+    assert not cfg_path.exists()
+
+
+def test_join_accepts_every_model_the_router_knows(tmp_path, monkeypatch):
+    """Guards the other direction: the check must not reject valid models.
+
+    Driven from the router itself, so adding a model cannot leave this behind.
+    """
+    from orvix_node.inference.router import MODEL_TO_ENGINE
+
+    for i, model in enumerate(sorted(MODEL_TO_ENGINE)):
+        sub = tmp_path / f"m{i}"
+        sub.mkdir()
+        result, cfg_path = _invoke_join(
+            sub, monkeypatch,
+            ["--provider-id", "p", "--node-secret", "s", "--model", model],
+            verify=lambda c: "node-x",
+        )
+        assert result.exit_code == 0, f"{model}: {result.output}"
+        assert f'model: "{model}"' in cfg_path.read_text()
