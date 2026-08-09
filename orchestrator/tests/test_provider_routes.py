@@ -20,7 +20,7 @@ def ctx(monkeypatch):
         tier="gold",
         available_usdc=500.0,
         lifetime_earnings_usdc=500.0,
-        staked_orvx=50000.0,  # above the 25K provider minimum
+        staked_orvx=50000.0,
     )
     app.dependency_overrides[get_supabase] = lambda: db
     app.dependency_overrides[get_current_user] = lambda: user
@@ -46,10 +46,17 @@ def test_register_returns_both_credentials(ctx):
     assert row["provider_secret_hash"]
 
 
-def test_provider_register_with_stake_required_true_blocks_below_25k(monkeypatch):
+def test_provider_register_with_stake_required_true_blocks_below_minimum(monkeypatch):
+    """Named for the behaviour, not the number.
+
+    This used to carry `25k` in its name and assert `required == "25000"`, so it
+    broke the moment the policy moved — testing the setting rather than the gate.
+    It now pins its own minimum and asserts the gate honours it.
+    """
     monkeypatch.setattr(provider_mod.settings, "REQUIRE_STAKE_FOR_PROVIDER", True)
+    monkeypatch.setattr(provider_mod.settings, "PROVIDER_MIN_STAKE_ORVX", 25000)
     db = FakeSupabase()
-    # below the 25K minimum, and not yet a provider
+    # below the pinned minimum, and not yet a provider
     user = db.add_user(
         tier="bronze", staked_orvx=1000.0, is_provider=False, provider_secret_hash=None
     )

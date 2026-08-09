@@ -253,7 +253,7 @@ the listener credits your stake automatically.
 ### `POST /v1/staking/unstake`
 Unstake ORVX and queue a payout. **Auth: JWT.**
 Body: `{ "amount": <number>, "destination_wallet": <optional> }`. Providers cannot
-unstake below the 25,000 ORVX minimum (`400 provider_minimum_stake`). This floor
+unstake below the 2,000,000 ORVX minimum (`400 provider_minimum_stake`). This floor
 is **not** suspended during the alpha — `REQUIRE_STAKE_FOR_PROVIDER` governs
 registration only, while this check keys off `is_provider` alone.
 
@@ -381,7 +381,7 @@ All require **Auth: JWT.**
 Register the current account as a provider. Returns `provider_id` and
 `node_secret` — the pair `orvix-node join` asks for. The secret is shown once
 and stored only as a hash, so a lost secret is rotated, not recovered.
-**Requires a stake of at least 25,000 ORVX** — returns `400 insufficient_stake`
+**Requires a stake of at least 2,000,000 ORVX** — returns `400 insufficient_stake`
 otherwise. Stake first via `POST /v1/staking/stake-intent`. The stake gate is
 off during the alpha (`REQUIRE_STAKE_FOR_PROVIDER=false`).
 

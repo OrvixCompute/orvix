@@ -31,7 +31,7 @@ balance at the proposal's snapshot block.
 
 - Buyback percentage (currently 50% of the platform fee)
 - Burn schedule (currently monthly)
-- Minimum stake requirements (currently 25,000 ORVX for providers; tier thresholds)
+- Minimum stake requirements (currently 2,000,000 ORVX for providers; tier thresholds)
 - New model additions
 - Treasury allocations above a threshold (e.g. 10% of treasury)
 - Network parameters
