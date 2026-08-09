@@ -94,9 +94,17 @@ async def register_provider(
 
 @router.post("/regenerate-secret", response_model=SecretResponse)
 async def regenerate_secret(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_provider),
     db: Client = Depends(get_supabase),
 ):
+    """Rotate the node secret. Providers only.
+
+    This used to accept any authenticated JWT, so a non-provider could mint
+    themselves a valid `provider_secret_hash` — the exact credential a node
+    authenticates with — without ever registering. Registration is the step that
+    records consent and applies the stake gate, so minting around it made that
+    gate optional.
+    """
     secret = secrets.token_urlsafe(24)
     db.table("users").update({"provider_secret_hash": _hash_secret(secret)}).eq(
         "id", current_user["id"]
