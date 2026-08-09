@@ -12,7 +12,7 @@ from supabase import Client
 
 from app.config import settings
 from app.database import get_supabase
-from app.dependencies import get_current_user
+from app.dependencies import get_current_provider, get_current_user
 from app.exceptions import NotFoundError, ValidationError
 from app.logger import logger
 from app.models.protocol import ShutdownMessage
@@ -283,7 +283,7 @@ async def earnings(
 @router.post("/withdraw", response_model=WithdrawResponse)
 async def withdraw(
     body: WithdrawRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_provider),
     db: Client = Depends(get_supabase),
 ):
     destination = body.destination_wallet or current_user["wallet_address"]

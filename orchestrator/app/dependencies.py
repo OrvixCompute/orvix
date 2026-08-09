@@ -15,7 +15,7 @@ from supabase import Client
 
 from app.config import settings
 from app.database import get_supabase
-from app.exceptions import UnauthorizedError
+from app.exceptions import ForbiddenError, UnauthorizedError
 from app.logger import logger
 from app.services.api_key_service import hash_key
 from app.services.auth_service import auth_service
@@ -70,6 +70,24 @@ async def get_current_user(
 ) -> dict:
     """Resolve the current user from a JWT bearer token."""
     return _user_from_jwt(db, _bearer_token(request))
+
+
+async def get_current_provider(current_user: dict = Depends(get_current_user)) -> dict:
+    """Resolve the current user and require that they opted in as a provider.
+
+    Provider payouts were gated only by `available_usdc` being non-zero, which
+    is a balance and not a role: `is_provider` was written at registration and
+    never read back. That held only because non-providers happen to have a zero
+    balance, so any change that credits a non-provider would have opened the
+    payout path to them.
+    """
+    if not current_user.get("is_provider"):
+        raise ForbiddenError(
+            "This endpoint is for registered providers. "
+            "Register with POST /v1/provider/register first.",
+            error_code="not_a_provider",
+        )
+    return current_user
 
 
 def _touch_last_used(api_key_id: str) -> None:

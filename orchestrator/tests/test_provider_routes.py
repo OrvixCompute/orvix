@@ -162,3 +162,31 @@ def test_withdraw_insufficient(ctx):
         json={"amount": 9999, "destination_wallet": VALID_WALLET},
     )
     assert r.status_code == 402
+
+
+def test_withdraw_refused_for_non_provider(monkeypatch):
+    """A funded non-provider must not reach the payout path.
+
+    Funded deliberately: the old gate was `available_usdc`, so a zero-balance
+    non-provider would be refused for the wrong reason and prove nothing.
+    """
+    db = FakeSupabase()
+    user = db.add_user(available_usdc=500.0, is_provider=False, provider_secret_hash=None)
+    app.dependency_overrides[get_supabase] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: user
+    monkeypatch.setattr(payout_mod, "get_supabase", lambda: db)
+    client = TestClient(app)
+    try:
+        r = client.post(
+            "/v1/provider/withdraw",
+            json={"amount": 200, "destination_wallet": VALID_WALLET},
+        )
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "not_a_provider"
+        # Nothing was locked: the balance never moved to pending.
+        row = next(r for r in db._table("users").rows if r["id"] == user["id"])
+        assert float(row["available_usdc"]) == pytest.approx(500.0)
+        assert float(row.get("pending_withdrawal_usdc") or 0) == pytest.approx(0.0)
+        assert db._table("withdrawals").rows == []
+    finally:
+        app.dependency_overrides.clear()
