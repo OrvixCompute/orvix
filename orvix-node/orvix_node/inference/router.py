@@ -15,9 +15,10 @@ MODEL_TO_ENGINE: Dict[str, str] = {
     "qwen-2.5-7b": "chat",
     "flux-schnell": "image",
     "orvix-image-1": "image",
+    "orvix-video-1": "video",
 }
 
-ENGINE_TYPES = ("chat", "image")
+ENGINE_TYPES = ("chat", "image", "video")
 
 
 def engine_type_for(model_id: str) -> str:
@@ -37,14 +38,23 @@ def models_for_engine(engine_type: str) -> List[str]:
     return [m for m, et in MODEL_TO_ENGINE.items() if et == engine_type]
 
 
-def available_engine_types(enable_image: bool = False) -> List[str]:
+def available_engine_types(
+    enable_image: bool = False, enable_video: bool = False
+) -> List[str]:
     """Engine types this node advertises.
 
-    Chat is always available. Image is opt-in (``enable_image``) because serving
-    it safely alongside chat needs the ModelManager's VRAM swap (Session 2); we
-    do not advertise a capability the node cannot yet fulfil.
+    Chat is always available. Image and video are opt-in because serving them
+    alongside chat needs the ModelManager's VRAM swap; we do not advertise a
+    capability the node cannot fulfil.
+
+    ``enable_video`` defaults off for a second reason beyond VRAM: a clip takes
+    minutes, and a node that accepts one has effectively left the pool for that
+    long. Advertising video is a deliberate choice about what the machine is
+    for, not a feature toggle.
     """
     types = ["chat"]
     if enable_image:
         types.append("image")
+    if enable_video:
+        types.append("video")
     return types

@@ -9,6 +9,7 @@ On top of that lifecycle sit two families:
 
 * :class:`ChatEngine` — text generation (``generate`` / ``generate_stream``).
 * :class:`ImageEngine` — image generation (``infer``).
+* :class:`VideoEngine` — text-to-video generation (``infer``).
 
 ``load`` takes the orchestrator-facing ``model_id`` so a single engine can serve
 several models later; engines that serve a fixed model may ignore the argument.
@@ -74,6 +75,40 @@ class ImageResult(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+# --- Video value objects ---------------------------------------------------
+class VideoRequest(BaseModel):
+    """A single text-to-video request.
+
+    Bounds are deliberately tighter than the image ones. A clip costs roughly
+    ``num_frames`` times an image, so an unbounded request is not merely a slow
+    request but a wedged GPU: the node holds the card for the whole generation
+    and every other job queues behind it.
+    """
+
+    prompt: str
+    negative_prompt: Optional[str] = None
+    width: int = Field(704, ge=256, le=1280)
+    height: int = Field(480, ge=256, le=720)
+    # Latent video pipelines expect 8k+1 frames, so the default is a valid
+    # count rather than a round one. See VideoEngine.normalize_frames.
+    num_frames: int = Field(97, ge=9, le=257)
+    fps: int = Field(24, ge=8, le=60)
+    num_inference_steps: int = Field(30, ge=1, le=60)
+    guidance_scale: float = 3.0
+    seed: Optional[int] = None
+
+
+class VideoResult(BaseModel):
+    """Encoded MP4 bytes plus generation metadata.
+
+    Carried as bytes for the same reason :class:`ImageResult` is — this module
+    must stay importable without torch, diffusers, or a GPU.
+    """
+
+    mp4_bytes: bytes
+    metadata: dict = Field(default_factory=dict)
+
+
 # --- Engine hierarchy ------------------------------------------------------
 class AbstractEngine(ABC):
     """Common lifecycle + capability metadata for every inference engine.
@@ -124,3 +159,32 @@ class ImageEngine(AbstractEngine):
     @abstractmethod
     async def infer(self, request: ImageRequest) -> ImageResult:
         """Generate one image and return its PNG bytes + metadata."""
+
+
+class VideoEngine(AbstractEngine):
+    """Base for text-to-video engines. Concrete engines implement :meth:`infer`.
+
+    A sibling of :class:`ImageEngine` rather than a subclass: the two share only
+    the lifecycle, and a clip is a different enough unit of work — minutes
+    instead of seconds, an MP4 instead of a PNG — that inheriting image's shape
+    would mislead every caller that switches on ``engine_type``.
+    """
+
+    engine_type: ClassVar[str] = "video"
+
+    @staticmethod
+    def normalize_frames(num_frames: int) -> int:
+        """Round ``num_frames`` up to the nearest 8k+1.
+
+        Latent video pipelines compress time by 8, so a count that is not 8k+1
+        is silently altered by the pipeline — the caller asks for 100 frames,
+        gets 97, and the duration implied by their fps is wrong. Rounding here
+        keeps the returned metadata honest about what was produced.
+        """
+        if num_frames < 9:
+            return 9
+        return ((num_frames - 1 + 7) // 8) * 8 + 1
+
+    @abstractmethod
+    async def infer(self, request: VideoRequest) -> VideoResult:
+        """Generate one clip and return its MP4 bytes + metadata."""
