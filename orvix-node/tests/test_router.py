@@ -53,3 +53,19 @@ def test_available_engine_types_with_video():
     ]
     # And stays off by default — a clip parks the node for minutes.
     assert "video" not in available_engine_types()
+
+
+def test_embedding_model_routes_to_the_embedding_engine():
+    from orvix_node.inference.router import engine_type_for
+
+    assert engine_type_for("orvix-embed-1") == "embedding"
+
+
+def test_available_engine_types_with_embedding():
+    # Independent of the other two: a node can serve embeddings while its GPU
+    # is busy with chat, which is the reason this engine exists.
+    assert available_engine_types(enable_embedding=True) == ["chat", "embedding"]
+    assert available_engine_types(
+        enable_image=True, enable_video=True, enable_embedding=True
+    ) == ["chat", "image", "video", "embedding"]
+    assert "embedding" not in available_engine_types()

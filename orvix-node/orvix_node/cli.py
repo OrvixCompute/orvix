@@ -116,6 +116,14 @@ async def _run_agent(cfg) -> None:
         engines["image"] = OrvixImageEngine()
         mode = "resident concurrently" if cfg.concurrent_engines else "swap on demand"
         logger.info("Image engine enabled — chat<->image will {}.", mode)
+    if cfg.enable_embedding_engine:
+        from orvix_node.inference.embedding import OrvixEmbeddingEngine
+
+        engines["embedding"] = OrvixEmbeddingEngine()
+        logger.info(
+            "Embedding engine enabled (device={}) — runs off the GPU by default.",
+            OrvixEmbeddingEngine().device,
+        )
     if cfg.enable_video_engine:
         from orvix_node.inference.video import OrvixVideoEngine
 
@@ -184,8 +192,12 @@ async def _run_agent(cfg) -> None:
     # requested id anyway (see OrvixImageEngine/FluxEngine.load), and
     # clients/frontends may still request an older catalog id (e.g.
     # "flux-schnell") that now routes to whichever image engine is running.
-    image_models = models_for_engine("image") if "image" in engines else None
-    client = OrchestratorClient(cfg, extra_models=image_models)
+    extra_models = list(models_for_engine("image")) if "image" in engines else []
+    if "embedding" in engines:
+        extra_models += models_for_engine("embedding")
+    if "video" in engines:
+        extra_models += models_for_engine("video")
+    client = OrchestratorClient(cfg, extra_models=extra_models or None)
 
     async def job_handler(job) -> None:
         await executor.execute(
@@ -197,8 +209,12 @@ async def _run_agent(cfg) -> None:
             dispatch, send_complete=client.send_message, send_failed=client.send_message
         )
 
+    async def embedding_handler(dispatch) -> None:
+        await executor.execute_embedding(dispatch, send_result=client.send_message)
+
     client.set_job_handler(job_handler)
     client.set_image_handler(image_handler)
+    client.set_embedding_handler(embedding_handler)
 
     # Graceful shutdown on SIGINT/SIGTERM.
     loop = asyncio.get_running_loop()

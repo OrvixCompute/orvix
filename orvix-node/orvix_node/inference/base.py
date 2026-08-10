@@ -10,6 +10,7 @@ On top of that lifecycle sit two families:
 * :class:`ChatEngine` — text generation (``generate`` / ``generate_stream``).
 * :class:`ImageEngine` — image generation (``infer``).
 * :class:`VideoEngine` — text-to-video generation (``infer``).
+* :class:`EmbeddingEngine` — text embeddings (``embed``).
 
 ``load`` takes the orchestrator-facing ``model_id`` so a single engine can serve
 several models later; engines that serve a fixed model may ignore the argument.
@@ -109,6 +110,22 @@ class VideoResult(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+# --- Embedding value objects -----------------------------------------------
+class EmbeddingRequest(BaseModel):
+    """A batch of strings to embed. Order is part of the contract — the caller
+    matches vectors back to inputs by position, so an engine must never
+    reorder, drop, or deduplicate."""
+
+    input: List[str]
+
+
+class EmbeddingResult(BaseModel):
+    """One vector per input, in the same order, plus generation metadata."""
+
+    embeddings: List[List[float]]
+    metadata: dict = Field(default_factory=dict)
+
+
 # --- Engine hierarchy ------------------------------------------------------
 class AbstractEngine(ABC):
     """Common lifecycle + capability metadata for every inference engine.
@@ -188,3 +205,21 @@ class VideoEngine(AbstractEngine):
     @abstractmethod
     async def infer(self, request: VideoRequest) -> VideoResult:
         """Generate one clip and return its MP4 bytes + metadata."""
+
+
+class EmbeddingEngine(AbstractEngine):
+    """Base for text-embedding engines. Concrete engines implement :meth:`embed`.
+
+    Cheap and small next to the others: milliseconds per input, a few hundred
+    floats out, and light enough to run on CPU. That is why it is worth serving
+    even on a node whose GPU is busy with something else.
+    """
+
+    engine_type: ClassVar[str] = "embedding"
+    # Advertised so a client can size a vector store before calling. Concrete
+    # engines must set this to their model's true width.
+    dimensions: ClassVar[int] = 0
+
+    @abstractmethod
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        """Embed every input, returning one vector per input in input order."""

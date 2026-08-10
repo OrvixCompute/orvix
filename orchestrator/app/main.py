@@ -38,6 +38,7 @@ from app.routes import (
     billing,
     governance,
     health,
+    embeddings,
     images,
     inference,
     models,
@@ -101,6 +102,7 @@ app.include_router(auth.router)
 app.include_router(api_keys.router)
 app.include_router(inference.router)
 app.include_router(images.router)
+app.include_router(embeddings.router)
 app.include_router(models.router)
 app.include_router(billing.router)
 app.include_router(node.router)

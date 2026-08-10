@@ -32,6 +32,7 @@ pip install -e .            # core only (mock backend)
 # pip install -e .[gpu]     # + vLLM for real inference (Linux/CUDA)
 # pip install -e .[image]   # + diffusers stack for image generation
 # pip install -e .[video]   # + diffusers/ffmpeg stack for text-to-video
+# pip install -e .[embed]   # + sentence-transformers for embeddings (CPU is fine)
 ```
 
 Verify:
@@ -89,6 +90,27 @@ Restart=always
 sudo systemctl enable --now orvix-node
 systemctl status orvix-node
 ```
+
+## Embeddings
+
+Off by default; turn on with `enable_embedding_engine: true` and the `embed`
+extra. Serves the catalog id `orvix-embed-1` (BAAI/bge-base-en-v1.5, 768 dims).
+
+Unlike image and video, this one **runs on CPU by default and does not touch the
+GPU** — which is the point. A node already busy serving chat can answer
+embedding requests without competing for the card, so enabling it costs almost
+nothing. Override with `ORVIX_NODE_EMBED_DEVICE=cuda` if you have headroom.
+
+| Env | Default |
+|---|---|
+| `ORVIX_NODE_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` |
+| `ORVIX_NODE_EMBED_DEVICE` | `cpu` |
+| `ORVIX_NODE_EMBED_CACHE_DIR` | `./models/orvix-embed` |
+
+Vectors are L2-normalized before they leave the node, so callers can use a dot
+product for cosine similarity. Output order always matches input order — the
+engine refuses rather than returns a mismatched count, because a short result
+would misalign every vector with its text in the caller's database.
 
 ## Video generation
 

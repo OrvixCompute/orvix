@@ -309,6 +309,19 @@ class NodeManager:
         candidates.sort(key=lambda c: c.current_jobs)
         return candidates[0] if candidates else None
 
+    def select_embedding_node(self, model: str) -> NodeConnection | None:
+        """Pick a ready node advertising the embedding engine and serving `model`."""
+        candidates = [
+            c
+            for c in self.connected_nodes.values()
+            if c.status == "ready"
+            and "embedding" in c.engines
+            and model in c.models_supported
+            and c.current_jobs < c.max_concurrent_jobs
+        ]
+        candidates.sort(key=lambda c: c.current_jobs)
+        return candidates[0] if candidates else None
+
     # --- dispatch ----------------------------------------------------------
     async def dispatch_job(self, node: NodeConnection, job: JobMessage):
         """Send a job to a node and return its result.
@@ -334,6 +347,18 @@ class NodeManager:
         finally:
             node.pending_jobs.pop(job.job_id, None)
             node.current_jobs = max(0, node.current_jobs - 1)
+
+    async def dispatch_embedding_job(
+        self, node: NodeConnection, job
+    ) -> JobResultMessage:
+        """Send an embedding job and await its result.
+
+        Reuses the blocking path rather than adding a parallel one: an embedding
+        answer is a single ``job_result``, exactly like a non-streaming chat
+        answer, so the pending-future map, the timeout and the slot accounting
+        are already correct for it.
+        """
+        return await self._dispatch_blocking(node, job)
 
     async def _dispatch_streaming(
         self, node: NodeConnection, job: JobMessage

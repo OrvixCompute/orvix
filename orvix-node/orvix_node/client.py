@@ -21,6 +21,7 @@ from orvix_node.protocol import (
     BaseMessage,
     GPUInfo,
     HeartbeatMessage,
+    EmbeddingJobDispatchMessage,
     ImageJobDispatchMessage,
     JobMessage,
     RegisterMessage,
@@ -32,6 +33,7 @@ from orvix_node.version import __version__
 
 JobHandler = Callable[[JobMessage], Awaitable[None]]
 ImageHandler = Callable[[ImageJobDispatchMessage], Awaitable[None]]
+EmbeddingHandler = Callable[[EmbeddingJobDispatchMessage], Awaitable[None]]
 
 ACK_TIMEOUT = 10.0
 MAX_BACKOFF = 60.0
@@ -48,6 +50,7 @@ class OrchestratorClient:
         self._outbound: asyncio.Queue[BaseMessage] = asyncio.Queue()
         self._job_handler: JobHandler | None = None
         self._image_handler: ImageHandler | None = None
+        self._embedding_handler: EmbeddingHandler | None = None
         self._stop = asyncio.Event()
         self._draining = False
         self._connected = False
@@ -63,6 +66,9 @@ class OrchestratorClient:
 
     def set_image_handler(self, callback: ImageHandler) -> None:
         self._image_handler = callback
+
+    def set_embedding_handler(self, callback: EmbeddingHandler) -> None:
+        self._embedding_handler = callback
 
     async def send_message(self, msg: BaseMessage) -> None:
         await self._outbound.put(msg)
@@ -216,7 +222,9 @@ class OrchestratorClient:
             models_supported=[self.config.model, *self._extra_models],
             max_concurrent_jobs=self.config.max_concurrent_jobs,
             engines=available_engine_types(
-                self.config.enable_image_engine, self.config.enable_video_engine
+                self.config.enable_image_engine,
+                self.config.enable_video_engine,
+                self.config.enable_embedding_engine,
             ),
             vram_gb=round(gpu.vram_total_mb / 1024, 1) if gpu.vram_total_mb else 0.0,
             node_id=self.config.node_id or None,
@@ -276,6 +284,8 @@ class OrchestratorClient:
             await self._dispatch_job(msg)  # type: ignore[arg-type]
         elif mtype == "job.image.dispatch":
             await self._dispatch_image(msg)  # type: ignore[arg-type]
+        elif mtype == "job.embedding.dispatch":
+            await self._dispatch_embedding(msg)  # type: ignore[arg-type]
         elif mtype == "ping":
             await self.send_message(
                 HeartbeatMessage(
@@ -296,6 +306,18 @@ class OrchestratorClient:
             return
         # Run in the background so the receive loop keeps flowing.
         task = asyncio.create_task(self._job_handler(job), name=f"job-{job.job_id}")
+        self._job_tasks.add(task)
+        task.add_done_callback(self._job_tasks.discard)
+
+    async def _dispatch_embedding(self, job: EmbeddingJobDispatchMessage) -> None:
+        if self._embedding_handler is None:
+            logger.warning(
+                "Received embedding job {} but no handler registered", job.job_id
+            )
+            return
+        task = asyncio.create_task(
+            self._embedding_handler(job), name=f"embedding-{job.job_id}"
+        )
         self._job_tasks.add(task)
         task.add_done_callback(self._job_tasks.discard)
 

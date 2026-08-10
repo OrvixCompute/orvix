@@ -20,10 +20,17 @@ import uuid
 from typing import Awaitable, Callable
 
 from orvix_node.binary import register_image
-from orvix_node.inference.base import ChatEngine, GenerateRequest, ImageEngine, ImageRequest
+from orvix_node.inference.base import (
+    ChatEngine,
+    EmbeddingRequest as EngineEmbeddingRequest,
+    GenerateRequest,
+    ImageEngine,
+    ImageRequest,
+)
 from orvix_node.inference.manager import ModelManager
 from orvix_node.logger import logger
 from orvix_node.protocol import (
+    EmbeddingJobDispatchMessage,
     ImageJobCompleteMessage,
     ImageJobDispatchMessage,
     ImageJobFailedMessage,
@@ -89,6 +96,54 @@ class JobExecutor:
                     status="failed",
                     error=str(exc),
                     latency_ms=latency_ms,
+                )
+            )
+        finally:
+            await state.remove_job(job.job_id)
+            self._sem.release()
+
+    async def execute_embedding(
+        self, job: EmbeddingJobDispatchMessage, send_result: SendFn
+    ) -> None:
+        """Run one embedding job. Never raises — failures go back as job_result.
+
+        Answers with an ordinary ``job_result`` rather than a bespoke completion
+        message: an embedding reply is small JSON, so it needs none of the
+        binary-fetch machinery image jobs require, and reusing the chat-shaped
+        result keeps the orchestrator's pending-future map the only place that
+        has to know how a request completes.
+
+        Shares the general job semaphore, not the image one — embeddings are
+        milliseconds of CPU, so throttling them at the image limit would serialize
+        something that costs nothing to run alongside.
+        """
+        await self._sem.acquire()
+        await state.add_job(job.job_id, {"model": job.model, "kind": "embedding"})
+        started = time.perf_counter()
+        try:
+            async with self.manager.serving(job.model) as engine:
+                result = await engine.embed(EngineEmbeddingRequest(input=job.input))
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            await send_result(
+                JobResultMessage(
+                    job_id=job.job_id,
+                    status="completed",
+                    result={
+                        "embeddings": result.embeddings,
+                        "metadata": result.metadata,
+                    },
+                    latency_ms=latency_ms,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — report, don't crash the agent
+            logger.exception("Embedding job {} failed: {}", job.job_id, exc)
+            await state.record_failed()
+            await send_result(
+                JobResultMessage(
+                    job_id=job.job_id,
+                    status="failed",
+                    error=str(exc),
+                    latency_ms=int((time.perf_counter() - started) * 1000),
                 )
             )
         finally:
