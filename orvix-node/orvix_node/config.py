@@ -70,6 +70,17 @@ class NodeConfig(BaseModel):
     # engine it cannot yet serve. Dual-mode (chat + image on one GPU) also needs
     # vllm_managed=true so the manager can free VRAM by stopping the vLLM server.
     enable_image_engine: bool = False
+    # Advertise + serve text-to-video. Opt-in and off by default for a reason
+    # beyond VRAM: a clip takes minutes, during which this node cannot take any
+    # other job. Enable it on a machine dedicated to video, not on the one
+    # carrying chat traffic.
+    enable_video_engine: bool = False
+    # Cap simultaneous video jobs independently. One is the sane default — two
+    # concurrent clips on one card is how you OOM a GPU that handles one fine,
+    # the same trap image already hit.
+    max_concurrent_video_jobs: int = 1
+    # Where generated clips are written before the orchestrator fetches them.
+    video_tmp_dir: str = "/tmp/node-videos"
     # Let the node own the vLLM server as a subprocess (start on load, kill on
     # unload to free VRAM). Required for chat<->image swap; keep false when the
     # vLLM server is managed out of band.
@@ -207,6 +218,8 @@ backend: "mock"        # "mock" or "vllm"
 
 # Engines / VRAM (single-GPU swap):
 enable_image_engine: false   # advertise + serve image generation (needs vllm_managed for dual-mode)
+enable_video_engine: false   # advertise + serve text-to-video (a clip holds the GPU for minutes)
+max_concurrent_video_jobs: 1 # never raise this without measuring VRAM for two concurrent clips
 vllm_managed: false          # node owns the vLLM server subprocess (kill on unload to free VRAM)
 idle_unload_minutes: 10      # unload the resident engine after this many idle minutes
 

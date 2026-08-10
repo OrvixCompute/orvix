@@ -116,6 +116,17 @@ async def _run_agent(cfg) -> None:
         engines["image"] = OrvixImageEngine()
         mode = "resident concurrently" if cfg.concurrent_engines else "swap on demand"
         logger.info("Image engine enabled — chat<->image will {}.", mode)
+    if cfg.enable_video_engine:
+        from orvix_node.inference.video import OrvixVideoEngine
+
+        engines["video"] = OrvixVideoEngine()
+        # Said plainly at start-up rather than buried in docs: an operator who
+        # turns this on for a machine that also serves chat has changed what the
+        # node is, not just added a capability.
+        logger.warning(
+            "Video engine enabled — a clip holds the GPU for minutes, so this "
+            "node will be unavailable for other jobs while one runs."
+        )
 
     max_resident = len(engines) if cfg.concurrent_engines else 1
     manager = ModelManager(

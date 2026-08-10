@@ -34,3 +34,22 @@ def test_available_engine_types_default_chat_only():
 
 def test_available_engine_types_with_image():
     assert available_engine_types(enable_image=True) == ["chat", "image"]
+
+
+def test_video_model_routes_to_the_video_engine():
+    from orvix_node.inference.router import engine_type_for
+
+    assert engine_type_for("orvix-video-1") == "video"
+
+
+def test_available_engine_types_with_video():
+    # Video is opt-in independently of image: a machine can be dedicated to
+    # clips without also advertising image.
+    assert available_engine_types(enable_video=True) == ["chat", "video"]
+    assert available_engine_types(enable_image=True, enable_video=True) == [
+        "chat",
+        "image",
+        "video",
+    ]
+    # And stays off by default — a clip parks the node for minutes.
+    assert "video" not in available_engine_types()

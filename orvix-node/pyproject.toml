@@ -61,6 +61,17 @@ image = [
     "protobuf>=4.25",
     "Pillow>=10.0",
 ]
+# Text-to-video. Linux + CUDA only, and heavier than `image` — imageio-ffmpeg
+# is what actually writes the MP4 container.
+video = [
+    "diffusers>=0.31.0",
+    "transformers>=4.44.0",
+    "accelerate>=0.34.0",
+    "sentencepiece>=0.2.0",
+    "protobuf>=4.25",
+    "imageio>=2.34",
+    "imageio-ffmpeg>=0.5",
+]
 # GPU detection without vLLM (works for monitoring on any NVIDIA box).
 nvml = ["pynvml>=11.5"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]

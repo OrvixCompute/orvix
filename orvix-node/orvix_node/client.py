@@ -215,7 +215,9 @@ class OrchestratorClient:
             gpu_info=gpu,
             models_supported=[self.config.model, *self._extra_models],
             max_concurrent_jobs=self.config.max_concurrent_jobs,
-            engines=available_engine_types(self.config.enable_image_engine),
+            engines=available_engine_types(
+                self.config.enable_image_engine, self.config.enable_video_engine
+            ),
             vram_gb=round(gpu.vram_total_mb / 1024, 1) if gpu.vram_total_mb else 0.0,
             node_id=self.config.node_id or None,
         )

@@ -30,6 +30,8 @@ python -m venv .venv
 pip install -e .            # core only (mock backend)
 # pip install -e .[nvml]    # + real GPU detection (no vLLM)
 # pip install -e .[gpu]     # + vLLM for real inference (Linux/CUDA)
+# pip install -e .[image]   # + diffusers stack for image generation
+# pip install -e .[video]   # + diffusers/ffmpeg stack for text-to-video
 ```
 
 Verify:
@@ -87,6 +89,35 @@ Restart=always
 sudo systemctl enable --now orvix-node
 systemctl status orvix-node
 ```
+
+## Video generation
+
+Off by default. Turn it on with `enable_video_engine: true` (or
+`ORVIX_NODE_ENABLE_VIDEO_ENGINE=true`) and install the `video` extra. The engine
+serves the catalog id `orvix-video-1`, backed by LTX-Video through Diffusers;
+both the repo and the pipeline class are configurable:
+
+| Env | Default |
+|---|---|
+| `ORVIX_NODE_VIDEO_MODEL` | `Lightricks/LTX-Video` |
+| `ORVIX_NODE_VIDEO_PIPELINE` | `LTXPipeline` |
+| `ORVIX_NODE_VIDEO_CACHE_DIR` | `./models/orvix-video` |
+
+**Enable this on a machine dedicated to video.** A clip takes minutes, and for
+that whole time the node cannot serve anything else — turning it on for a box
+that also carries chat changes what the machine is, it does not just add a
+capability. `max_concurrent_video_jobs` defaults to 1; raising it without
+measuring VRAM for two simultaneous clips is how a card that handles one fine
+runs out of memory.
+
+Requested frame counts are rounded up to the nearest 8k+1, because latent video
+pipelines compress time by 8 and would otherwise silently alter the count. The
+result metadata reports both `num_frames` (produced) and `requested_frames`, so
+the duration it states is the real one.
+
+`required_vram_gb` on the engine is a **placeholder** (20 GB), set high enough
+that the ModelManager will not try to hold video resident beside a chat model.
+Measure it on the target card before trusting it for scheduling.
 
 ## Connection flow
 
