@@ -162,6 +162,27 @@ could not change that answer.
 `POST /v1/images/generations` makes the same distinction, returning
 `capacity_exhausted` or `no_image_provider`.
 
+### `POST /v1/embeddings`
+OpenAI-compatible text embeddings. **Auth: API key.**
+Body: `{ "model": "orvix-embed-1", "input": "text" | ["a","b"], "encoding_format": "float" | "base64" }`.
+Up to 256 inputs, 8192 characters each; pre-tokenized integer input is refused
+rather than mishandled.
+
+```json
+{ "object": "list", "model": "orvix-embed-1",
+  "data": [{ "object": "embedding", "index": 0, "embedding": [0.01, "..."] }],
+  "usage": { "prompt_tokens": 8, "total_tokens": 8 } }
+```
+
+Vectors come back **in input order** — `index` is the position to pair them by —
+and are **L2-normalized**, so cosine similarity is a dot product.
+`503 no_embedding_provider` means nobody is serving the model (do not retry);
+`503 capacity_exhausted` means they are busy (do retry).
+
+**Free during the alpha**, rate-limited per API key in its own bucket so an
+indexing run cannot spend your chat allowance. There is no embedding price yet;
+when one exists this endpoint gains a quota gate like chat and images have.
+
 ---
 
 ## Models

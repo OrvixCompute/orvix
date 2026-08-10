@@ -16,9 +16,10 @@ MODEL_TO_ENGINE: Dict[str, str] = {
     "flux-schnell": "image",
     "orvix-image-1": "image",
     "orvix-video-1": "video",
+    "orvix-embed-1": "embedding",
 }
 
-ENGINE_TYPES = ("chat", "image", "video")
+ENGINE_TYPES = ("chat", "image", "video", "embedding")
 
 
 def engine_type_for(model_id: str) -> str:
@@ -39,7 +40,9 @@ def models_for_engine(engine_type: str) -> List[str]:
 
 
 def available_engine_types(
-    enable_image: bool = False, enable_video: bool = False
+    enable_image: bool = False,
+    enable_video: bool = False,
+    enable_embedding: bool = False,
 ) -> List[str]:
     """Engine types this node advertises.
 
@@ -57,4 +60,6 @@ def available_engine_types(
         types.append("image")
     if enable_video:
         types.append("video")
+    if enable_embedding:
+        types.append("embedding")
     return types

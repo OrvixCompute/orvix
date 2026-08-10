@@ -14,6 +14,9 @@ MODEL_CATALOG = [
     {"id": "llama-3.1-8b-quantized", "type": "chat", "context_window": 8192},
     {"id": "flux-schnell", "type": "image", "max_size": "1536x1536"},
     {"id": "orvix-image-1", "type": "image", "max_size": "1024x1024"},
+    # Embeddings. `dimensions` is advertised so a client can size a vector store
+    # before it ever calls the endpoint.
+    {"id": "orvix-embed-1", "type": "embedding", "dimensions": 768},
 ]
 
 # Image models supported via the /v1/images/generations endpoint. Derived from

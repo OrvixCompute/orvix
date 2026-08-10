@@ -150,6 +150,21 @@ class ImageJobDispatchMessage(BaseMessage):
     binary_token: str
 
 
+class EmbeddingJobDispatchMessage(BaseMessage):
+    """Orchestrator -> node: embed a batch of strings.
+
+    The node answers with an ordinary ``job_result`` carrying
+    ``{"embeddings": [[float, ...], ...]}``, so this reuses the existing
+    request/response plumbing (``dispatch_job`` and its pending-future map)
+    rather than adding a second completion path to keep in step with it.
+    """
+
+    type: Literal["job.embedding.dispatch"] = "job.embedding.dispatch"
+    job_id: str
+    model: str
+    input: List[str]
+
+
 class PingMessage(BaseMessage):
     type: Literal["ping"] = "ping"
 
@@ -171,6 +186,7 @@ AnyMessage = Annotated[
         RegisterAckMessage,
         JobMessage,
         ImageJobDispatchMessage,
+        EmbeddingJobDispatchMessage,
         PingMessage,
         ShutdownMessage,
     ],

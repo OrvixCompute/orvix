@@ -119,6 +119,20 @@ Each entry carries an `available` flag. Calling an unavailable model returns
 `503 no_chat_provider`, and retrying will not help — pick one with
 `available: true`.
 
+## Embeddings
+
+`POST /v1/embeddings` speaks OpenAI's shape, so RAG stacks that expect an
+embeddings endpoint work against the same base URL:
+
+```python
+client.embeddings.create(model="orvix-embed-1", input=["chunk one", "chunk two"])
+```
+
+Vectors return in input order and are L2-normalized. Free during the alpha, in
+its own rate-limit bucket. It still needs a provider running the embedding
+engine — check `available` on `orvix-embed-1` in `GET /v1/models` first, exactly
+as you would for a chat model.
+
 ## Allowances
 
 | Limit | Value |

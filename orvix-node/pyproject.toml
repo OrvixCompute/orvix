@@ -72,6 +72,8 @@ video = [
     "imageio>=2.34",
     "imageio-ffmpeg>=0.5",
 ]
+# Text embeddings. Light enough to run on CPU — no CUDA required.
+embed = ["sentence-transformers>=3.0"]
 # GPU detection without vLLM (works for monitoring on any NVIDIA box).
 nvml = ["pynvml>=11.5"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]

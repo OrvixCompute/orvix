@@ -313,3 +313,93 @@ async def test_execute_image_no_engine_fails(tmp_path):
     assert len(completes.messages) == 0
     assert len(fails.messages) == 1
     assert fails.messages[0].type == "job.image.failed"
+
+
+# --- embeddings ------------------------------------------------------------
+# The lint caught a broken import here that the suite did not, because nothing
+# exercised this path. These tests close that gap.
+
+
+class _FakeEmbedEngine:
+    engine_type = "embedding"
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.seen = None
+
+    async def embed(self, request):
+        from orvix_node.inference.base import EmbeddingResult
+
+        if self.fail:
+            raise RuntimeError("engine exploded")
+        self.seen = list(request.input)
+        return EmbeddingResult(
+            embeddings=[[0.5, 0.5] for _ in request.input],
+            metadata={"dimensions": 2},
+        )
+
+
+class _EmbedManager:
+    def __init__(self, engine):
+        self.engine = engine
+
+    def serving(self, model):
+        engine = self.engine
+
+        class _Ctx:
+            async def __aenter__(self):
+                return engine
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _Ctx()
+
+
+def _embed_job(inputs):
+    from orvix_node.protocol import EmbeddingJobDispatchMessage
+
+    return EmbeddingJobDispatchMessage(
+        job_id="job-e1", model="orvix-embed-1", input=inputs
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_embedding_returns_vectors_in_a_job_result():
+    """Answers with an ordinary job_result — the same shape non-streaming chat
+    uses, so the orchestrator needs no second completion path."""
+    from orvix_node.executor import JobExecutor
+
+    engine = _FakeEmbedEngine()
+    ex = JobExecutor(_EmbedManager(engine))
+    sent = []
+
+    async def _send(msg):
+        sent.append(msg)
+
+    await ex.execute_embedding(_embed_job(["a", "b"]), send_result=_send)
+
+    assert len(sent) == 1
+    msg = sent[0]
+    assert msg.type == "job_result"
+    assert msg.status == "completed"
+    assert msg.result["embeddings"] == [[0.5, 0.5], [0.5, 0.5]]
+    assert engine.seen == ["a", "b"], "input order is the contract"
+
+
+@pytest.mark.asyncio
+async def test_execute_embedding_reports_failure_without_raising():
+    """A failing engine must come back as a failed result, not crash the agent."""
+    from orvix_node.executor import JobExecutor
+
+    ex = JobExecutor(_EmbedManager(_FakeEmbedEngine(fail=True)))
+    sent = []
+
+    async def _send(msg):
+        sent.append(msg)
+
+    await ex.execute_embedding(_embed_job(["a"]), send_result=_send)
+
+    assert len(sent) == 1
+    assert sent[0].status == "failed"
+    assert "engine exploded" in sent[0].error
