@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 — they briefly shared a number without sharing a meaning. Published from a
 `node-v*` tag via PyPI Trusted Publishing, so no API token is involved.
 
+- **0.2.5** — embedding engine (`orvix-embed-1`, BAAI/bge-base-en-v1.5, 768 dims)
+  behind `enable_embedding_engine`, plus the `embed` extra. Runs on CPU by
+  default, so a node already serving chat can answer embeddings without
+  competing for the GPU. Also adds the text-to-video engine (`orvix-video-1`)
+  behind `enable_video_engine` and the `video` extra
 - **0.2.4** — `orvix-node join` rejects an unknown `--model` before contacting the
   orchestrator, instead of accepting it and failing hours later at `start` with
   `ValueError: Unknown model`. The error names the models the node can serve
