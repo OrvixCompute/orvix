@@ -25,6 +25,7 @@ from orvix_node.protocol import (
     ImageJobDispatchMessage,
     JobMessage,
     RegisterMessage,
+    VideoJobDispatchMessage,
     parse_message,
     serialize,
 )
@@ -34,6 +35,7 @@ from orvix_node.version import __version__
 JobHandler = Callable[[JobMessage], Awaitable[None]]
 ImageHandler = Callable[[ImageJobDispatchMessage], Awaitable[None]]
 EmbeddingHandler = Callable[[EmbeddingJobDispatchMessage], Awaitable[None]]
+VideoHandler = Callable[[VideoJobDispatchMessage], Awaitable[None]]
 
 ACK_TIMEOUT = 10.0
 MAX_BACKOFF = 60.0
@@ -51,6 +53,7 @@ class OrchestratorClient:
         self._job_handler: JobHandler | None = None
         self._image_handler: ImageHandler | None = None
         self._embedding_handler: EmbeddingHandler | None = None
+        self._video_handler: VideoHandler | None = None
         self._stop = asyncio.Event()
         self._draining = False
         self._connected = False
@@ -69,6 +72,9 @@ class OrchestratorClient:
 
     def set_embedding_handler(self, callback: EmbeddingHandler) -> None:
         self._embedding_handler = callback
+
+    def set_video_handler(self, callback: VideoHandler) -> None:
+        self._video_handler = callback
 
     async def send_message(self, msg: BaseMessage) -> None:
         await self._outbound.put(msg)
@@ -286,6 +292,8 @@ class OrchestratorClient:
             await self._dispatch_image(msg)  # type: ignore[arg-type]
         elif mtype == "job.embedding.dispatch":
             await self._dispatch_embedding(msg)  # type: ignore[arg-type]
+        elif mtype == "job.video.dispatch":
+            await self._dispatch_video(msg)  # type: ignore[arg-type]
         elif mtype == "ping":
             await self.send_message(
                 HeartbeatMessage(
@@ -326,5 +334,13 @@ class OrchestratorClient:
             logger.warning("Received image job {} but no image handler registered", job.job_id)
             return
         task = asyncio.create_task(self._image_handler(job), name=f"image-{job.job_id}")
+        self._job_tasks.add(task)
+        task.add_done_callback(self._job_tasks.discard)
+
+    async def _dispatch_video(self, job: VideoJobDispatchMessage) -> None:
+        if self._video_handler is None:
+            logger.warning("Received video job {} but no video handler registered", job.job_id)
+            return
+        task = asyncio.create_task(self._video_handler(job), name=f"video-{job.job_id}")
         self._job_tasks.add(task)
         task.add_done_callback(self._job_tasks.discard)

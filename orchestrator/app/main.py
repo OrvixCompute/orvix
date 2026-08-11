@@ -46,6 +46,7 @@ from app.routes import (
     node,
     provider,
     staking,
+    videos,
 )
 from app.services.node_manager import node_manager
 from app.services.payment_listener import payment_listener
@@ -103,6 +104,7 @@ app.include_router(api_keys.router)
 app.include_router(inference.router)
 app.include_router(images.router)
 app.include_router(embeddings.router)
+app.include_router(videos.router)
 app.include_router(models.router)
 app.include_router(billing.router)
 app.include_router(node.router)

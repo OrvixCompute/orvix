@@ -149,6 +149,8 @@ async def _run_agent(cfg) -> None:
         image_tmp_dir=cfg.image_tmp_dir,
         binary_base_url=binary_base_url,
         max_concurrent_image=cfg.max_concurrent_image_jobs,
+        video_tmp_dir=cfg.video_tmp_dir,
+        max_concurrent_video=cfg.max_concurrent_video_jobs,
     )
 
     # Pre-warm the chat engine so the first request isn't slowed by a cold load.
@@ -212,9 +214,15 @@ async def _run_agent(cfg) -> None:
     async def embedding_handler(dispatch) -> None:
         await executor.execute_embedding(dispatch, send_result=client.send_message)
 
+    async def video_handler(dispatch) -> None:
+        await executor.execute_video(
+            dispatch, send_complete=client.send_message, send_failed=client.send_message
+        )
+
     client.set_job_handler(job_handler)
     client.set_image_handler(image_handler)
     client.set_embedding_handler(embedding_handler)
+    client.set_video_handler(video_handler)
 
     # Graceful shutdown on SIGINT/SIGTERM.
     loop = asyncio.get_running_loop()

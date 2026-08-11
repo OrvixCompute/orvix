@@ -204,6 +204,27 @@ class Settings(BaseSettings):
         5000, description="Refuse new image jobs when IMAGE_STORAGE_DIR exceeds this size"
     )
 
+    # --- Video generation --------------------------------------------------
+    VIDEO_JOB_TIMEOUT: int = Field(
+        600, description="Seconds to wait for a node to complete a video job (clips take minutes)"
+    )
+    VIDEO_STORAGE_DIR: str = Field(
+        "/var/orvix/videos", description="Local dir where generated videos are saved"
+    )
+    PUBLIC_VIDEO_URL_BASE: str = Field(
+        "https://orvix.network/videos",
+        description="Public base URL that maps to VIDEO_STORAGE_DIR (served by nginx)",
+    )
+    MAX_VIDEO_STORAGE_MB: int = Field(
+        20000, description="Refuse new video jobs when VIDEO_STORAGE_DIR exceeds this size"
+    )
+    VIDEO_DAILY_LIMIT_HOLDER: int = Field(
+        5, description="Daily video generations for holders (resets 00:00 UTC)"
+    )
+    VIDEO_DAILY_LIMIT_FALLBACK: int = Field(
+        5, description="Daily video generations for everyone when ORVX_MINT_ADDRESS is unset"
+    )
+
     # --- Treasury architecture (cold/hot/payout) ---------------------------
     # TREASURY_WALLET_ADDRESS (above) is the HOT wallet: it receives incoming
     # USDC deposits and the payment listener subscribes to it. Do NOT reroute it.

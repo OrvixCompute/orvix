@@ -56,6 +56,36 @@ def test_unknown_image_404():
     assert r.status_code == 404
 
 
+# --- video binary endpoint --------------------------------------------------
+def test_video_fetch_streams_and_deletes(tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"MP4DATA")
+    binary.register_video("vid1", "tok123", str(path))
+
+    r = _client().get("/v1/binary/video/vid1", headers={"X-Node-Secret": "tok123"})
+    assert r.status_code == 200
+    assert r.content == b"MP4DATA"
+    assert r.headers["content-type"] == "video/mp4"
+    # Served exactly once: file + registry entry removed by the background task.
+    assert not path.exists()
+    assert "vid1" not in binary._registry
+
+
+def test_video_wrong_token_401(tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"X")
+    binary.register_video("vid2", "right", str(path))
+
+    r = _client().get("/v1/binary/video/vid2", headers={"X-Node-Secret": "wrong"})
+    assert r.status_code == 401
+    assert path.exists()  # not deleted on failed auth
+
+
+def test_unknown_video_404():
+    r = _client().get("/v1/binary/video/nope", headers={"X-Node-Secret": "x"})
+    assert r.status_code == 404
+
+
 # --- temp-file sweeper -----------------------------------------------------
 def test_sweep_removes_old_files_and_registry(tmp_path):
     import time

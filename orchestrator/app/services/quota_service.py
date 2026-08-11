@@ -1,11 +1,12 @@
-"""Chat + image quota accounting and enforcement.
+"""Chat + image + video quota accounting and enforcement.
 
 Enforcement functions raise OrvixException (402/403/429) when a request must be
 blocked, and otherwise return quota info for response headers. Counters use
 read-modify-write (fine for the single-worker alpha; revisit with an atomic
 upsert/RPC when scaling to multiple workers).
 
-Reset: image quota is keyed by UTC date, so it resets at 00:00 UTC by rollover.
+Reset: image/video quota is keyed by UTC date, so it resets at 00:00 UTC by
+rollover.
 """
 
 from __future__ import annotations
@@ -218,6 +219,126 @@ def refund_image_quota(db: Client, wallet: str, units: int) -> None:
     logger.info("Refunded {} image quota unit(s) to {}", units, wallet)
 
 
+# --- video ------------------------------------------------------------------
+def _video_used(db: Client, wallet: str, day: str) -> int:
+    res = (
+        db.table("video_quota_usage")
+        .select("count")
+        .eq("wallet_address", wallet)
+        .eq("usage_date", day)
+        .limit(1)
+        .execute()
+    )
+    return int(res.data[0]["count"]) if res.data else 0
+
+
+def _bump_video(db: Client, wallet: str, day: str, units: int) -> None:
+    existing = (
+        db.table("video_quota_usage")
+        .select("count")
+        .eq("wallet_address", wallet)
+        .eq("usage_date", day)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        db.table("video_quota_usage").update(
+            {"count": int(existing.data[0]["count"]) + units}
+        ).eq("wallet_address", wallet).eq("usage_date", day).execute()
+    else:
+        db.table("video_quota_usage").insert(
+            {"wallet_address": wallet, "usage_date": day, "count": units}
+        ).execute()
+
+
+def enforce_video_quota(
+    db: Client,
+    wallet: str,
+    is_holder: bool,
+    balance: float,
+    units: int,
+    usdc_balance: Decimal | float = 0,
+) -> dict:
+    """Gate a video request for `units` clips.
+
+    Same shape as enforce_image_quota: within the daily allowance the request is
+    free (and consumes it), past it with USDC it becomes a paid request, past it
+    with nothing it is refused. During the alpha the paid flow is unreachable —
+    there is no video price yet — but keeping the branch means a priced phase
+    changes nothing here.
+
+    Raises 403 not_holder when ORVX_MINT_ADDRESS is set and the caller does not
+    hold enough ORVX.
+    """
+    address_set = bool(settings.ORVX_MINT_ADDRESS)
+    if address_set:
+        if not is_holder:
+            raise OrvixException(
+                f"Video generation requires holding at least "
+                f"{settings.ORVX_HOLDER_THRESHOLD} ORVX. Current balance: {balance:.0f} ORVX.",
+                error_code="not_holder",
+                status_code=403,
+                details={"upgrade_url": settings.TOKENOMICS_URL},
+            )
+        daily_limit = settings.VIDEO_DAILY_LIMIT_HOLDER
+    else:
+        daily_limit = settings.VIDEO_DAILY_LIMIT_FALLBACK
+
+    day = _today_iso()
+    used = _video_used(db, wallet, day)
+    if used + units > daily_limit:
+        if float(usdc_balance) > 0:
+            return {
+                "type": "paid",
+                "free": False,
+                "remaining": 0,
+                "reset_at": _next_midnight_iso(),
+                "limit": daily_limit,
+            }
+        raise OrvixException(
+            f"Daily video quota ({daily_limit}) exhausted. Resets at 00:00 UTC, "
+            "or top up USDC to keep generating.",
+            error_code="daily_quota_exceeded",
+            status_code=429,
+            details={
+                "reset_at": _next_midnight_iso(),
+                "used": used,
+                "daily_limit": daily_limit,
+                "upgrade_url": settings.UPGRADE_URL,
+            },
+        )
+    _bump_video(db, wallet, day, units)
+    return {
+        "type": "free",
+        "free": True,
+        "remaining": daily_limit - (used + units),
+        "reset_at": _next_midnight_iso(),
+        "limit": daily_limit,
+    }
+
+
+def refund_video_quota(db: Client, wallet: str, units: int) -> None:
+    """Give back `units` of today's video quota (e.g. after a generation failure)."""
+    if units <= 0:
+        return
+    day = _today_iso()
+    existing = (
+        db.table("video_quota_usage")
+        .select("count")
+        .eq("wallet_address", wallet)
+        .eq("usage_date", day)
+        .limit(1)
+        .execute()
+    )
+    if not existing.data:
+        return
+    new_count = max(0, int(existing.data[0]["count"]) - units)
+    db.table("video_quota_usage").update({"count": new_count}).eq(
+        "wallet_address", wallet
+    ).eq("usage_date", day).execute()
+    logger.info("Refunded {} video quota unit(s) to {}", units, wallet)
+
+
 # --- status (for GET /v1/account/quota) ------------------------------------
 def quota_status(db: Client, wallet: str, is_holder: bool, balance: float) -> dict:
     address_set = bool(settings.ORVX_MINT_ADDRESS)
@@ -240,6 +361,15 @@ def quota_status(db: Client, wallet: str, is_holder: bool, balance: float) -> di
         image = {"type": "grace_daily", "used_today": used_today, "daily_limit": settings.IMAGE_DAILY_LIMIT_FALLBACK}
     image["resets_at"] = _next_midnight_iso()
 
+    used_video = _video_used(db, wallet, _today_iso())
+    if address_set and not is_holder:
+        video = {"type": "locked", "used_today": used_video, "daily_limit": 0}
+    elif address_set:
+        video = {"type": "holder_daily", "used_today": used_video, "daily_limit": settings.VIDEO_DAILY_LIMIT_HOLDER}
+    else:
+        video = {"type": "grace_daily", "used_today": used_video, "daily_limit": settings.VIDEO_DAILY_LIMIT_FALLBACK}
+    video["resets_at"] = _next_midnight_iso()
+
     return {
         "wallet": wallet,
         "is_holder": is_holder,
@@ -247,4 +377,5 @@ def quota_status(db: Client, wallet: str, is_holder: bool, balance: float) -> di
         "orvx_holder_threshold": settings.ORVX_HOLDER_THRESHOLD,
         "chat": chat,
         "image": image,
+        "video": video,
     }

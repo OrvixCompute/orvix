@@ -111,6 +111,20 @@ class ImageJobFailedMessage(BaseMessage):
     error: str
 
 
+class VideoJobCompleteMessage(BaseMessage):
+    type: Literal["job.video.complete"] = "job.video.complete"
+    job_id: str
+    video_id: str
+    binary_url: str  # where the orchestrator fetches the MP4 bytes
+    metadata: dict = Field(default_factory=dict)
+
+
+class VideoJobFailedMessage(BaseMessage):
+    type: Literal["job.video.failed"] = "job.video.failed"
+    job_id: str
+    error: str
+
+
 # --- Inbound: orchestrator -> node -----------------------------------------
 class RegisterAckMessage(BaseMessage):
     type: Literal["register_ack"] = "register_ack"
@@ -165,6 +179,32 @@ class EmbeddingJobDispatchMessage(BaseMessage):
     input: List[str]
 
 
+class VideoJobDispatchMessage(BaseMessage):
+    """Orchestrator -> node: generate a text-to-video clip.
+
+    Fields mirror the node's VideoRequest bounds (width 256-1280, height
+    256-720, num_frames 9-257, fps 8-60, steps 1-60, guidance 0-20) with the
+    same defaults, so a bare dispatch matches the engine's intent. The node
+    answers with ``job.video.complete`` (binary MP4 fetch) or ``job.video.failed``.
+    """
+
+    type: Literal["job.video.dispatch"] = "job.video.dispatch"
+    job_id: str
+    model: str
+    prompt: str
+    negative_prompt: Optional[str] = None
+    width: int = 704
+    height: int = 480
+    num_frames: int = 97
+    fps: int = 24
+    num_inference_steps: int = 30
+    guidance_scale: float = 3.0
+    seed: Optional[int] = None
+    # Per-job token for the X-Node-Secret header on the MP4 binary fetch, same
+    # scheme as image jobs.
+    binary_token: str
+
+
 class PingMessage(BaseMessage):
     type: Literal["ping"] = "ping"
 
@@ -183,10 +223,13 @@ AnyMessage = Annotated[
         JobChunkMessage,
         ImageJobCompleteMessage,
         ImageJobFailedMessage,
+        VideoJobCompleteMessage,
+        VideoJobFailedMessage,
         RegisterAckMessage,
         JobMessage,
         ImageJobDispatchMessage,
         EmbeddingJobDispatchMessage,
+        VideoJobDispatchMessage,
         PingMessage,
         ShutdownMessage,
     ],

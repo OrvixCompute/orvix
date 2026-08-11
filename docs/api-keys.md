@@ -75,6 +75,19 @@ curl -X POST https://orvix.network/v1/images/generations \
 
 The response carries a `url`; fetch it to get the PNG.
 
+Video generation (free + daily quota during the alpha):
+
+```bash
+curl -X POST https://orvix.network/v1/videos/generations \
+  -H "Authorization: Bearer orvx_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"model": "orvix-video-1", "prompt": "a cat walking through a neon city",
+       "width": 704, "height": 480, "num_frames": 97, "fps": 24}'
+```
+
+The response carries an MP4 `url` — fetch it, because videos are auto-deleted
+after 24 hours.
+
 Responses include an `X-Orvix-Node` header naming the GPU node that served the
 request — useful when you are reporting a bad result.
 

@@ -17,12 +17,18 @@ MODEL_CATALOG = [
     # Embeddings. `dimensions` is advertised so a client can size a vector store
     # before it ever calls the endpoint.
     {"id": "orvix-embed-1", "type": "embedding", "dimensions": 768},
+    # Video. `max_size` is the largest (width, height) LTX-Video handles; the
+    # request model constrains frames/fps/steps/guidance on top of this.
+    {"id": "orvix-video-1", "type": "video", "max_size": "1280x720"},
 ]
 
 # Image models supported via the /v1/images/generations endpoint. Derived from
 # the catalog so the two cannot drift — every accepted model is guaranteed to
 # have a max_size to validate against.
 IMAGE_MODELS = tuple(e["id"] for e in MODEL_CATALOG if e["type"] == "image")
+
+# Video models supported via the /v1/videos/generations endpoint.
+VIDEO_MODELS = tuple(e["id"] for e in MODEL_CATALOG if e["type"] == "video")
 
 
 def image_model_max_size(model_id: str) -> tuple[int, int]:

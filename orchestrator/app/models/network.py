@@ -15,6 +15,7 @@ class NodeStats(BaseModel):
     offline: int
     chat_capable: int
     image_capable: int
+    video_capable: int
     total_vram_gb: str
 
 
@@ -43,14 +44,23 @@ class ImageStats(BaseModel):
     generated_window: int
 
 
+class VideoStats(BaseModel):
+    generated_total: int
+    generated_window: int
+
+
 class ModelStats(BaseModel):
     chat: int = Field(..., description="Chat models in the catalog")
     image: int = Field(..., description="Image models in the catalog")
+    video: int = Field(..., description="Video models in the catalog")
     chat_available: int = Field(
         ..., description="Chat models a currently connected node actually serves"
     )
     image_available: int = Field(
         ..., description="Image models a currently connected node actually serves"
+    )
+    video_available: int = Field(
+        ..., description="Video models a currently connected node actually serves"
     )
 
 
@@ -61,5 +71,6 @@ class NetworkStatsResponse(BaseModel):
     providers: ProviderStats
     chat: ChatStats
     images: ImageStats
+    videos: VideoStats
     models: ModelStats
     generated_at: datetime = Field(..., description="When these numbers were computed (cache stamp)")

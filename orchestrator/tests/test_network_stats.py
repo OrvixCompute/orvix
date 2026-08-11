@@ -59,6 +59,15 @@ def _seed(db: FakeSupabase) -> None:
             "vram_gb": 80.0,
         }
     )
+    db._table("nodes").insert_row(
+        {
+            "provider_id": provider["id"],
+            "status": "ready",
+            "gpu_model": "RTX 4090",
+            "engines": ["chat", "video"],
+            "vram_gb": 24.0,
+        }
+    )
 
     # Two real jobs inside the window, one outside it, one mock, one failed.
     db._table("jobs").insert_row(
@@ -119,6 +128,9 @@ def _seed(db: FakeSupabase) -> None:
     db._table("image_jobs").insert_row({"model": "flux-schnell", "created_at": _iso(3)})
     db._table("image_jobs").insert_row({"model": "flux-schnell", "created_at": _iso(100)})
 
+    db._table("video_jobs").insert_row({"model": "orvix-video-1", "created_at": _iso(2)})
+    db._table("video_jobs").insert_row({"model": "orvix-video-1", "created_at": _iso(72)})
+
 
 def _connected(node_id: str, models: list[str], status: str = "ready"):
     from app.services.node_manager import NodeConnection
@@ -155,16 +167,17 @@ def test_node_and_provider_counts(ctx):
 
     nodes = client.get("/v1/network/stats").json()["nodes"]
     # Registration facts come from the database rows.
-    assert nodes["registered"] == 3
-    assert nodes["chat_capable"] == 3
+    assert nodes["registered"] == 4
+    assert nodes["chat_capable"] == 4
     assert nodes["image_capable"] == 1
-    assert float(nodes["total_vram_gb"]) == 128.0
+    assert nodes["video_capable"] == 1
+    assert float(nodes["total_vram_gb"]) == 152.0
     # Per-status counts describe live connections, and none of the seeded rows
-    # is connected — so all three read as offline regardless of the status the
+    # is connected — so all four read as offline regardless of the status the
     # database last recorded for them.
     assert nodes["ready"] == 0
     assert nodes["busy"] == 0
-    assert nodes["offline"] == 3
+    assert nodes["offline"] == 4
 
     providers = client.get("/v1/network/stats").json()["providers"]
     assert providers["total"] == 1
@@ -176,7 +189,8 @@ def test_gpu_breakdown_is_ranked(ctx):
     _seed(db)
 
     gpus = client.get("/v1/network/stats").json()["gpus"]
-    assert gpus == [{"gpu_model": "RTX 4090", "count": 2}, {"gpu_model": "A100", "count": 1}]
+    # Three RTX 4090 (2 chat+image, 1 chat+video) and one A100.
+    assert gpus == [{"gpu_model": "RTX 4090", "count": 3}, {"gpu_model": "A100", "count": 1}]
 
 
 def test_mock_and_failed_jobs_are_excluded(ctx):
@@ -198,8 +212,10 @@ def test_image_and_model_counts(ctx):
 
     body = client.get("/v1/network/stats").json()
     assert body["images"] == {"generated_total": 2, "generated_window": 1}
+    assert body["videos"] == {"generated_total": 2, "generated_window": 1}
     assert body["models"]["chat"] >= 1
     assert body["models"]["image"] >= 1
+    assert body["models"]["video"] >= 1
 
 
 def test_empty_network_returns_zeros(ctx):
@@ -266,6 +282,7 @@ def test_model_counts_separate_catalog_from_actually_served(ctx):
     assert models["chat"] >= 3 and models["image"] >= 2
     assert models["chat_available"] == 1
     assert models["image_available"] == 1
+    assert models["video_available"] == 0
 
 
 def test_node_status_counts_stay_consistent_with_online(ctx):
@@ -275,13 +292,12 @@ def test_node_status_counts_stay_consistent_with_online(ctx):
     ready=0 and offline=1 when a node reconnected inside the cache window.
     """
     client, db = ctx
-    _seed(db)  # snapshot has 3 registered nodes, none connected
+    _seed(db)  # snapshot has 4 registered nodes, none connected
 
     first = client.get("/v1/network/stats").json()["nodes"]
     assert first["online"] == 0
     assert first["ready"] == 0
     assert first["offline"] == first["registered"]
-
     # Reconnect inside the cache window — the snapshot is stale on purpose.
     node_manager.connected_nodes["n1"] = _connected("n1", ["qwen-2.5-7b"], status="ready")
     nodes = client.get("/v1/network/stats").json()["nodes"]

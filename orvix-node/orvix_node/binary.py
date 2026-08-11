@@ -27,10 +27,14 @@ def register_image(image_id: str, token: str, path: str) -> None:
     _registry[image_id] = {"token": token, "path": path}
 
 
-def sweep_temp_dir(tmp_dir: str, max_age_seconds: float = 3600, now: float | None = None) -> dict:
-    """Delete leftover image temp files older than max_age_seconds.
+def register_video(video_id: str, token: str, path: str) -> None:
+    _registry[video_id] = {"token": token, "path": path}
 
-    Handles two leak cases: an image that completed but was never fetched (still
+
+def sweep_temp_dir(tmp_dir: str, max_age_seconds: float = 3600, now: float | None = None) -> dict:
+    """Delete leftover image/video temp files older than max_age_seconds.
+
+    Handles two leak cases: a job that completed but was never fetched (still
     registered → drop the registry entry too), and files left by an earlier crash
     (not registered → remove the file). Returns {"removed": n}.
     """
@@ -45,14 +49,20 @@ def sweep_temp_dir(tmp_dir: str, max_age_seconds: float = 3600, now: float | Non
                 continue
             if now - os.path.getmtime(fpath) < max_age_seconds:
                 continue
-            image_id = name[:-4] if name.endswith(".png") else name
+            # Registry keys are the id without the extension (.png or .mp4).
+            for suffix in (".png", ".mp4"):
+                if name.endswith(suffix):
+                    image_id = name[: -len(suffix)]
+                    break
+            else:
+                image_id = name
             _registry.pop(image_id, None)
             os.remove(fpath)
             result["removed"] += 1
         except OSError as exc:  # noqa: BLE001
             logger.warning("Temp sweep failed to remove {}: {}", fpath, exc)
     if result["removed"]:
-        logger.info("Temp sweep removed {} stale image file(s)", result["removed"])
+        logger.info("Temp sweep removed {} stale file(s)", result["removed"])
     return result
 
 
@@ -84,6 +94,24 @@ def create_binary_router() -> APIRouter:
             path,
             media_type="image/png",
             background=BackgroundTask(_cleanup, image_id, path),
+        )
+
+    @router.get("/v1/binary/video/{video_id}")
+    async def get_video(video_id: str, x_node_secret: str | None = Header(default=None)):
+        entry = _registry.get(video_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="video not found")
+        if not x_node_secret or not secrets.compare_digest(x_node_secret, entry["token"]):
+            raise HTTPException(status_code=401, detail="invalid node secret")
+        path = entry["path"]
+        if not os.path.exists(path):
+            _registry.pop(video_id, None)
+            raise HTTPException(status_code=404, detail="video file missing")
+        # Stream the MP4, then delete the temp file + registry entry.
+        return FileResponse(
+            path,
+            media_type="video/mp4",
+            background=BackgroundTask(_cleanup, video_id, path),
         )
 
     return router

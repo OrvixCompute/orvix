@@ -16,10 +16,17 @@ from orvix_node.inference.base import (
     ImageRequest,
     ImageResult,
     GenerateUsage,
+    VideoEngine,
+    VideoRequest,
+    VideoResult,
 )
 from orvix_node.inference.manager import ModelManager
 from orvix_node.inference.mock import MockBackend
-from orvix_node.protocol import ImageJobDispatchMessage, JobMessage
+from orvix_node.protocol import (
+    ImageJobDispatchMessage,
+    JobMessage,
+    VideoJobDispatchMessage,
+)
 from orvix_node.state import state
 
 
@@ -403,3 +410,109 @@ async def test_execute_embedding_reports_failure_without_raising():
     assert len(sent) == 1
     assert sent[0].status == "failed"
     assert "engine exploded" in sent[0].error
+
+
+# --- video jobs ------------------------------------------------------------
+class FakeVideoEngine(VideoEngine):
+    def __init__(self):
+        self._loaded = False
+
+    async def load(self, model_id):
+        self._loaded = True
+
+    async def unload(self):
+        self._loaded = False
+
+    async def is_loaded(self):
+        return self._loaded
+
+    async def infer(self, request: VideoRequest) -> VideoResult:
+        return VideoResult(
+            mp4_bytes=b"MP4DATA",
+            metadata={"num_frames": request.num_frames, "seed": request.seed},
+        )
+
+
+def _video_dispatch(job_id="vj1"):
+    return VideoJobDispatchMessage(
+        job_id=job_id,
+        model="orvix-video-1",
+        prompt="a cat walking",
+        binary_token="tok",
+    )
+
+
+async def test_execute_video_success(tmp_path):
+    binary._registry.clear()
+    mgr = ModelManager({"video": FakeVideoEngine()})
+    ex = JobExecutor(mgr, video_tmp_dir=str(tmp_path), binary_base_url="http://node:9000")
+    completes, fails = Collector(), Collector()
+
+    await ex.execute_video(_video_dispatch(), send_complete=completes, send_failed=fails)
+
+    assert len(fails.messages) == 0
+    assert len(completes.messages) == 1
+    msg = completes.messages[0]
+    assert msg.type == "job.video.complete"
+    assert msg.binary_url == f"http://node:9000/v1/binary/video/{msg.video_id}"
+    # File written and registered under the dispatch token for the binary fetch.
+    assert (tmp_path / f"{msg.video_id}.mp4").read_bytes() == b"MP4DATA"
+    assert binary._registry[msg.video_id]["token"] == "tok"
+
+
+class SlowVideoEngine(VideoEngine):
+    """Tracks max concurrency to verify the video-specific semaphore."""
+
+    def __init__(self):
+        self.active = 0
+        self.max_active = 0
+        self._loaded = False
+
+    async def load(self, model_id):
+        self._loaded = True
+
+    async def unload(self):
+        self._loaded = False
+
+    async def is_loaded(self):
+        return self._loaded
+
+    async def infer(self, request: VideoRequest) -> VideoResult:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0.1)
+        finally:
+            self.active -= 1
+        return VideoResult(mp4_bytes=b"MP4DATA", metadata={})
+
+
+async def test_video_jobs_serialize_by_default(tmp_path):
+    # A clip holds the GPU for minutes; max_concurrent_video_jobs defaults to 1.
+    engine = SlowVideoEngine()
+    ex = JobExecutor(
+        ModelManager({"video": engine}), video_tmp_dir=str(tmp_path), binary_base_url="http://n:9000"
+    )
+    sink = Collector()
+    await asyncio.gather(
+        *[
+            ex.execute_video(_video_dispatch(job_id=f"vj{i}"), send_complete=sink, send_failed=sink)
+            for i in range(3)
+        ]
+    )
+    assert engine.max_active == 1
+    assert len(sink.messages) == 3
+    assert all(m.type == "job.video.complete" for m in sink.messages)
+
+
+async def test_execute_video_no_engine_fails(tmp_path):
+    # Manager has no video engine -> acquire raises -> failure reported.
+    mgr = ModelManager({"chat": MockBackend("p")})
+    ex = JobExecutor(mgr, video_tmp_dir=str(tmp_path), binary_base_url="http://n:9000")
+    completes, fails = Collector(), Collector()
+
+    await ex.execute_video(_video_dispatch(), send_complete=completes, send_failed=fails)
+
+    assert len(completes.messages) == 0
+    assert len(fails.messages) == 1
+    assert fails.messages[0].type == "job.video.failed"

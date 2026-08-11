@@ -183,6 +183,38 @@ and are **L2-normalized**, so cosine similarity is a dot product.
 indexing run cannot spend your chat allowance. There is no embedding price yet;
 when one exists this endpoint gains a quota gate like chat and images have.
 
+### `POST /v1/videos/generations`
+Text-to-video generation. **Auth: API key.**
+
+```bash
+curl -X POST https://orvix.network/v1/videos/generations \
+  -H "Authorization: Bearer orvx_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"model": "orvix-video-1", "prompt": "a cat walking through a neon city",
+       "width": 704, "height": 480, "num_frames": 97, "fps": 24}'
+```
+
+Request: `model` (`orvix-video-1`), `prompt` (required), and the generation
+knobs — `width` (256–1280, default 704), `height` (256–720, default 480),
+`num_frames` (9–257, default 97), `fps` (8–60, default 24),
+`num_inference_steps` (1–60, default 30), `guidance_scale` (0–20, default 3.0),
+`negative_prompt`, `seed`. One clip per call.
+
+```json
+{ "created": ..., "data": [{ "url": "https://orvix.network/videos/<id>.mp4" }] }
+```
+
+Quota headers: `X-Orvix-Quota-Remaining`, `X-Orvix-Quota-Reset`.
+
+> ⚠️ **Videos are auto-deleted after 24 hours.** Download and save anything you
+> want to keep. Video is **free during the alpha**, limited by a daily per-account
+> allowance (`GET /v1/account/quota` shows the `video` status). A clip takes
+> minutes of GPU on the node, so the endpoint serializes per node — expect a slow
+> response. Errors mirror the image path: `503 no_video_provider` means nobody is
+> serving the model (do not retry), `503 capacity_exhausted` means nodes are busy
+> (retry after `retry_after_seconds`), and `504 node_timeout` means the clip took
+> longer than `VIDEO_JOB_TIMEOUT`.
+
 ---
 
 ## Models

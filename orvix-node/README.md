@@ -130,7 +130,10 @@ that whole time the node cannot serve anything else — turning it on for a box
 that also carries chat changes what the machine is, it does not just add a
 capability. `max_concurrent_video_jobs` defaults to 1; raising it without
 measuring VRAM for two simultaneous clips is how a card that handles one fine
-runs out of memory.
+runs out of memory. Generated clips are written to `video_tmp_dir`
+(default `/tmp/node-videos`) and served to the orchestrator over the node's
+binary endpoint (`/v1/binary/video/<id>`), which deletes each MP4 after the
+one-time fetch.
 
 Requested frame counts are rounded up to the nearest 8k+1, because latent video
 pipelines compress time by 8 and would otherwise silently alter the count. The

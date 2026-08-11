@@ -30,6 +30,9 @@ from app.models.protocol import (
     JobResultMessage,
     RegisterMessage,
     ShutdownMessage,
+    VideoJobCompleteMessage,
+    VideoJobDispatchMessage,
+    VideoJobFailedMessage,
     serialize,
 )
 
@@ -322,6 +325,19 @@ class NodeManager:
         candidates.sort(key=lambda c: c.current_jobs)
         return candidates[0] if candidates else None
 
+    def select_video_node(self, model: str) -> NodeConnection | None:
+        """Pick a ready node advertising the video engine and serving `model`."""
+        candidates = [
+            c
+            for c in self.connected_nodes.values()
+            if c.status == "ready"
+            and "video" in c.engines
+            and model in c.models_supported
+            and c.current_jobs < c.max_concurrent_jobs
+        ]
+        candidates.sort(key=lambda c: c.current_jobs)
+        return candidates[0] if candidates else None
+
     # --- dispatch ----------------------------------------------------------
     async def dispatch_job(self, node: NodeConnection, job: JobMessage):
         """Send a job to a node and return its result.
@@ -411,6 +427,36 @@ class NodeManager:
             raise RuntimeError(result.error)
         return result
 
+    async def dispatch_video_job(
+        self, node: NodeConnection, dispatch: VideoJobDispatchMessage
+    ) -> VideoJobCompleteMessage:
+        """Send a video job to a node and await its completion.
+
+        Returns the VideoJobCompleteMessage. Raises NodeTimeoutError on timeout
+        and RuntimeError if the node reports failure. The timeout is long —
+        a clip takes minutes of GPU — so it is configurable separately from
+        image jobs.
+        """
+        pending = PendingJob(stream=False, future=asyncio.get_running_loop().create_future())
+        node.pending_jobs[dispatch.job_id] = pending
+        node.current_jobs += 1
+        try:
+            await node.send(dispatch)
+            result = await asyncio.wait_for(
+                pending.future, timeout=float(settings.VIDEO_JOB_TIMEOUT)
+            )
+        except asyncio.TimeoutError as exc:
+            raise NodeTimeoutError(
+                f"Node {node.node_id} timed out on video job {dispatch.job_id}"
+            ) from exc
+        finally:
+            node.pending_jobs.pop(dispatch.job_id, None)
+            node.current_jobs = max(0, node.current_jobs - 1)
+
+        if isinstance(result, VideoJobFailedMessage):
+            raise RuntimeError(result.error)
+        return result
+
     # --- response correlation (called from the WS receive loop) ------------
     def handle_job_result(self, node_id: str, msg: JobResultMessage) -> None:
         conn = self.connected_nodes.get(node_id)
@@ -440,6 +486,17 @@ class NodeManager:
         self, node_id: str, msg: ImageJobCompleteMessage | ImageJobFailedMessage
     ) -> None:
         """Resolve the awaiting image dispatch with the complete/failed message."""
+        conn = self.connected_nodes.get(node_id)
+        if conn is None:
+            return
+        pending = conn.pending_jobs.get(msg.job_id)
+        if pending and pending.future is not None and not pending.future.done():
+            pending.future.set_result(msg)
+
+    def handle_video_result(
+        self, node_id: str, msg: VideoJobCompleteMessage | VideoJobFailedMessage
+    ) -> None:
+        """Resolve the awaiting video dispatch with the complete/failed message."""
         conn = self.connected_nodes.get(node_id)
         if conn is None:
             return

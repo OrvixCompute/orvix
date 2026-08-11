@@ -11,6 +11,7 @@ from orvix_node.exceptions import AuthError
 from orvix_node.protocol import (
     JobMessage,
     RegisterAckMessage,
+    VideoJobDispatchMessage,
     parse_message,
     serialize,
 )
@@ -178,6 +179,47 @@ async def test_job_routed_to_handler():
     try:
         await asyncio.wait_for(got_job.wait(), timeout=5)
         assert received["job_id"] == "job-xyz"
+    finally:
+        await client.stop()
+        task.cancel()
+        server.close()
+        await server.wait_closed()
+
+
+async def test_video_dispatch_routed_to_handler():
+    got_job = asyncio.Event()
+    received = {}
+
+    async def handler(ws):
+        await ws.recv()
+        await ws.send(serialize(RegisterAckMessage(node_id="n", accepted=True)))
+        await ws.send(
+            serialize(
+                VideoJobDispatchMessage(
+                    job_id="job-video-1",
+                    model="orvix-video-1",
+                    prompt="a cat walking",
+                    binary_token="tok",
+                )
+            )
+        )
+        async for _ in ws:
+            pass
+
+    server, port = await _serve(handler)
+    client = OrchestratorClient(_cfg(port))
+
+    async def video_handler(dispatch):
+        received["job_id"] = dispatch.job_id
+        received["model"] = dispatch.model
+        got_job.set()
+
+    client.set_video_handler(video_handler)
+    task = asyncio.create_task(client.start())
+    try:
+        await asyncio.wait_for(got_job.wait(), timeout=5)
+        assert received["job_id"] == "job-video-1"
+        assert received["model"] == "orvix-video-1"
     finally:
         await client.stop()
         task.cancel()

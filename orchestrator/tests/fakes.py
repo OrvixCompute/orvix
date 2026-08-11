@@ -351,6 +351,7 @@ class _Rpc:
             if j.get("status") == "completed" and not j.get("is_mock")
         ]
         images = self.db._table("image_jobs").rows
+        videos = self.db._table("video_jobs").rows
 
         def _in_window(rows):
             return [r for r in rows if (r.get("created_at") or "") >= since]
@@ -380,6 +381,7 @@ class _Rpc:
                     "offline": sum(1 for n in nodes if n.get("status") == "offline"),
                     "chat_capable": sum(1 for n in nodes if "chat" in (n.get("engines") or [])),
                     "image_capable": sum(1 for n in nodes if "image" in (n.get("engines") or [])),
+                    "video_capable": sum(1 for n in nodes if "video" in (n.get("engines") or [])),
                     "total_vram_gb": float(
                         sum(Decimal(str(n.get("vram_gb", 0) or 0)) for n in nodes)
                     ),
@@ -409,6 +411,10 @@ class _Rpc:
                 "images": {
                     "generated_total": len(images),
                     "generated_window": len(_in_window(images)),
+                },
+                "videos": {
+                    "generated_total": len(videos),
+                    "generated_window": len(_in_window(videos)),
                 },
             }
         )

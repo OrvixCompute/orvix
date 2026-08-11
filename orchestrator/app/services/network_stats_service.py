@@ -30,6 +30,7 @@ def _model_counts() -> dict:
     return {
         "chat": sum(1 for m in MODEL_CATALOG if m["type"] == "chat"),
         "image": sum(1 for m in MODEL_CATALOG if m["type"] == "image"),
+        "video": sum(1 for m in MODEL_CATALOG if m["type"] == "video"),
     }
 
 
@@ -42,6 +43,7 @@ def _fetch(db: Client) -> dict:
     nodes = raw.get("nodes") or {}
     chat = raw.get("chat") or {}
     images = raw.get("images") or {}
+    videos = raw.get("videos") or {}
     providers = raw.get("providers") or {}
     latency = chat.get("avg_latency_ms")
 
@@ -55,6 +57,7 @@ def _fetch(db: Client) -> dict:
             "offline": nodes.get("offline", 0),
             "chat_capable": nodes.get("chat_capable", 0),
             "image_capable": nodes.get("image_capable", 0),
+            "video_capable": nodes.get("video_capable", 0),
             "total_vram_gb": str(nodes.get("total_vram_gb", 0) or 0),
         },
         "gpus": raw.get("gpus") or [],
@@ -72,6 +75,10 @@ def _fetch(db: Client) -> dict:
         "images": {
             "generated_total": images.get("generated_total", 0),
             "generated_window": images.get("generated_window", 0),
+        },
+        "videos": {
+            "generated_total": videos.get("generated_total", 0),
+            "generated_window": videos.get("generated_window", 0),
         },
         "models": _model_counts(),
         "generated_at": datetime.now(timezone.utc),
@@ -114,6 +121,9 @@ def get_stats(db: Client) -> dict:
     )
     out["models"]["image_available"] = sum(
         1 for m in MODEL_CATALOG if m["type"] == "image" and m["id"] in served
+    )
+    out["models"]["video_available"] = sum(
+        1 for m in MODEL_CATALOG if m["type"] == "video" and m["id"] in served
     )
     return out
 

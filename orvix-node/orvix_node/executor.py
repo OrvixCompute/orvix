@@ -19,13 +19,15 @@ import time
 import uuid
 from typing import Awaitable, Callable
 
-from orvix_node.binary import register_image
+from orvix_node.binary import register_image, register_video
 from orvix_node.inference.base import (
     ChatEngine,
     EmbeddingRequest as EngineEmbeddingRequest,
     GenerateRequest,
     ImageEngine,
     ImageRequest,
+    VideoEngine,
+    VideoRequest,
 )
 from orvix_node.inference.manager import ModelManager
 from orvix_node.logger import logger
@@ -37,6 +39,9 @@ from orvix_node.protocol import (
     JobChunkMessage,
     JobMessage,
     JobResultMessage,
+    VideoJobCompleteMessage,
+    VideoJobDispatchMessage,
+    VideoJobFailedMessage,
 )
 from orvix_node.state import state
 
@@ -51,6 +56,8 @@ class JobExecutor:
         image_tmp_dir: str = "/tmp/node-images",
         binary_base_url: str = "",
         max_concurrent_image: int = 1,
+        video_tmp_dir: str = "/tmp/node-videos",
+        max_concurrent_video: int = 1,
     ) -> None:
         self.manager = manager
         self._sem = asyncio.Semaphore(max_concurrent)
@@ -61,6 +68,11 @@ class JobExecutor:
         # that happen. Chat and image run concurrently; image runs alone.
         self._image_sem = asyncio.Semaphore(max_concurrent_image)
         self.image_tmp_dir = image_tmp_dir
+        # Video jobs get the same treatment, even tighter: a clip holds the GPU
+        # for minutes, so a single card serves at most one at a time. This is the
+        # knob `max_concurrent_video_jobs` config controls (default 1).
+        self._video_sem = asyncio.Semaphore(max_concurrent_video)
+        self.video_tmp_dir = video_tmp_dir
         # Base URL the orchestrator uses to fetch generated images from this node.
         self.binary_base_url = binary_base_url.rstrip("/")
 
@@ -289,6 +301,64 @@ class JobExecutor:
         finally:
             await state.remove_job(dispatch.job_id)
             self._image_sem.release()
+
+    async def execute_video(
+        self,
+        dispatch: VideoJobDispatchMessage,
+        send_complete: SendFn,
+        send_failed: SendFn,
+    ) -> None:
+        """Run one video job. Never raises — failures are reported via send_failed.
+
+        Mirrors execute_image: generation happens under manager.serving(), the
+        MP4 bytes are written to the video temp dir and registered for a one-time
+        fetch by the orchestrator's binary endpoint.
+        """
+        await self._video_sem.acquire()
+        await state.add_job(dispatch.job_id, {"model": dispatch.model, "kind": "video"})
+        try:
+            req = VideoRequest(
+                prompt=dispatch.prompt,
+                negative_prompt=dispatch.negative_prompt,
+                width=dispatch.width,
+                height=dispatch.height,
+                num_frames=dispatch.num_frames,
+                fps=dispatch.fps,
+                num_inference_steps=dispatch.num_inference_steps,
+                guidance_scale=dispatch.guidance_scale,
+                seed=dispatch.seed,
+            )
+            async with self.manager.serving(dispatch.model) as engine:
+                assert isinstance(engine, VideoEngine)
+                result = await engine.infer(req)
+
+            video_id = str(uuid.uuid4())
+            os.makedirs(self.video_tmp_dir, exist_ok=True)
+            path = os.path.join(self.video_tmp_dir, f"{video_id}.mp4")
+            with open(path, "wb") as f:
+                f.write(result.mp4_bytes)
+            # Authorize the orchestrator's one-time fetch of this clip.
+            register_video(video_id, dispatch.binary_token, path)
+
+            binary_url = f"{self.binary_base_url}/v1/binary/video/{video_id}"
+            await state.record_completed(0)
+            await send_complete(
+                VideoJobCompleteMessage(
+                    job_id=dispatch.job_id,
+                    video_id=video_id,
+                    binary_url=binary_url,
+                    metadata=result.metadata,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — report, don't crash the agent
+            logger.exception("Video job {} failed: {}", dispatch.job_id, exc)
+            await state.record_failed()
+            await send_failed(
+                VideoJobFailedMessage(job_id=dispatch.job_id, error=str(exc))
+            )
+        finally:
+            await state.remove_job(dispatch.job_id)
+            self._video_sem.release()
 
     async def shutdown(self, timeout: float = 30.0) -> None:
         """Wait for active jobs to drain, then unload whatever engine is resident."""

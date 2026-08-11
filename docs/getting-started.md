@@ -38,7 +38,7 @@ Next steps:
 - Read [orchestrator/README.md](../orchestrator/README.md) for backend setup and
   how authentication / API keys work.
 - See the [API Reference](./api-reference.md) for every endpoint (including
-  `/v1/staking/*` and `/v1/account/tier`).
+  `/v1/staking/*`, `/v1/account/tier`, and `/v1/videos/generations`).
 
 ## For providers (run a node)
 
