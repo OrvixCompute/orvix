@@ -44,9 +44,21 @@ class Settings(BaseSettings):
     TREASURY_WALLET_ADDRESS: str = Field("", description="Treasury wallet that receives USDC deposits")
     USDC_MINT_ADDRESS: str = Field("", description="SPL mint address of the USDC token")
     ORVX_MINT_ADDRESS: str = Field("", description="SPL mint address of the ORVX token (staking deposits)")
-    HELIUS_API_KEY: str = Field("", description="Helius API key for Solana RPC")
+    # Solana JSON-RPC provider. Defaults to the OOBE Protocol Synapse gateway
+    # (mainnet US) — set SOLANA_RPC_URL to any compliant JSON-RPC endpoint
+    # (e.g. Helius) and it is used instead. SOLANA_RPC_API_KEY is sent as a
+    # Bearer token, matching the Synapse gateway's auth scheme.
+    SOLANA_RPC_URL: str = Field(
+        "https://us-1-mainnet.oobeprotocol.ai", description="Solana JSON-RPC endpoint (Synapse gateway by default)"
+    )
+    SOLANA_RPC_API_KEY: str = Field(
+        "", description="API key for the Solana RPC endpoint (sent as Bearer token; blank for public endpoints)"
+    )
+    # Backwards compatibility: legacy Helius configuration. HELIUS_RPC_URL /
+    # HELIUS_API_KEY are honored only when SOLANA_RPC_URL is left at its default.
+    HELIUS_API_KEY: str = Field("", description="Legacy Helius API key (used when SOLANA_RPC_URL is default)")
     HELIUS_RPC_URL: str = Field(
-        "https://mainnet.helius-rpc.com", description="Helius RPC base URL"
+        "https://mainnet.helius-rpc.com", description="Legacy Helius RPC base URL (used when SOLANA_RPC_URL is default)"
     )
     POLLING_INTERVAL_SECONDS: int = Field(15, description="Payment listener poll interval")
     ENABLE_PAYMENT_LISTENER: bool = Field(
@@ -315,12 +327,36 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     @property
-    def helius_rpc_endpoint(self) -> str:
-        """Full RPC URL including the API key query parameter when available."""
-        if self.HELIUS_API_KEY:
-            sep = "&" if "?" in self.HELIUS_RPC_URL else "?"
-            return f"{self.HELIUS_RPC_URL}{sep}api-key={self.HELIUS_API_KEY}"
-        return self.HELIUS_RPC_URL
+    def solana_rpc_endpoint(self) -> str:
+        """The Solana JSON-RPC endpoint to use.
+
+        SOLANA_RPC_URL wins. When it is left at the default (Synapse gateway),
+        legacy HELIUS_RPC_URL / HELIUS_API_KEY are honored so existing deploys
+        keep working unchanged; the Helius key is appended as an `api-key`
+        query param, which is how Helius authenticates. The Synapse gateway
+        instead authenticates with a Bearer header (see solana_rpc_headers).
+        """
+        url = self.SOLANA_RPC_URL
+        # Legacy deploy: SOLANA_RPC_URL left at the default but HELIUS_RPC_URL
+        # explicitly set -> keep using Helius, appending the key as a query
+        # param (Helius' auth scheme). When both are at their defaults, use
+        # the OOBE gateway.
+        if (
+            url == "https://us-1-mainnet.oobeprotocol.ai"
+            and self.HELIUS_RPC_URL != "https://mainnet.helius-rpc.com"
+        ):
+            url = self.HELIUS_RPC_URL
+            if self.HELIUS_API_KEY:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}api-key={self.HELIUS_API_KEY}"
+        return url
+
+    @property
+    def solana_rpc_headers(self) -> dict[str, str]:
+        """HTTP headers for the Solana RPC endpoint (Bearer auth when keyed)."""
+        if self.SOLANA_RPC_API_KEY:
+            return {"Authorization": f"Bearer {self.SOLANA_RPC_API_KEY}"}
+        return {}
 
 
 @lru_cache

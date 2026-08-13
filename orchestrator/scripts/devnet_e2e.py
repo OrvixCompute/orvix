@@ -342,11 +342,11 @@ def _build_ctx():
 def _preflight(ctx, allow_mainnet: bool) -> None:
     from app.config import settings
 
-    endpoint = settings.helius_rpc_endpoint
+    endpoint = settings.solana_rpc_endpoint
     if "devnet" not in endpoint and not allow_mainnet:
         raise SystemExit(
             f"RPC endpoint does not look like devnet ({endpoint!r}). "
-            "Point HELIUS_RPC_URL at devnet, or pass --allow-mainnet to override."
+            "Point SOLANA_RPC_URL (or HELIUS_RPC_URL) at devnet, or pass --allow-mainnet to override."
         )
     if not settings.USDC_MINT_ADDRESS:
         raise SystemExit("USDC_MINT_ADDRESS not configured")
@@ -358,7 +358,7 @@ def _print_plan(ctx, selected: list[str]) -> None:
     from app.config import settings
 
     print("Devnet E2E plan (DRY — pass --yes to execute):")
-    print(f"  RPC          : {settings.helius_rpc_endpoint}")
+    print(f"  RPC          : {settings.solana_rpc_endpoint}")
     print(f"  USDC mint    : {settings.USDC_MINT_ADDRESS}")
     print(f"  hot wallet   : {ctx.hot_owner}")
     print(f"  payout stub  : {settings.PAYOUT_STUB}   sweep stub: {settings.TREASURY_SWEEP_STUB}")

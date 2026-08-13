@@ -1,4 +1,10 @@
-"""Thin async wrappers around the Helius JSON-RPC endpoints we need."""
+"""Thin async wrappers around the Solana JSON-RPC endpoints we need.
+
+The endpoint is configurable (defaults to the OOBE Protocol Synapse gateway;
+see settings.solana_rpc_endpoint / solana_rpc_headers). The same JSON-RPC
+surface is served by Helius and any other compliant provider, so nothing here
+is provider-specific.
+"""
 
 from decimal import Decimal
 from typing import Any, Optional
@@ -28,7 +34,9 @@ class SolanaService:
     async def _rpc(self, method: str, params: list) -> Any:
         self._id += 1
         payload = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
-        resp = await self._client.post(settings.helius_rpc_endpoint, json=payload)
+        resp = await self._client.post(
+            settings.solana_rpc_endpoint, json=payload, headers=settings.solana_rpc_headers
+        )
         resp.raise_for_status()
         data = resp.json()
         if "error" in data:

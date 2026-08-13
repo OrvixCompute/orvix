@@ -1,9 +1,9 @@
 """Background worker that watches the treasury wallet and credits USDC top-ups.
 
-Polling design (Helius getSignaturesForAddress every N seconds). For each new
-signature we fetch the parsed transaction, extract the memo and any USDC
-transfer into the treasury's token account, match the memo against a pending
-top-up intent, and credit the user — idempotent on the Solana signature.
+Polling design (Solana JSON-RPC getSignaturesForAddress every N seconds). For
+each new signature we fetch the parsed transaction, extract the memo and any
+USDC transfer into the treasury's token account, match the memo against a
+pending top-up intent, and credit the user — idempotent on the Solana signature.
 """
 
 import asyncio
