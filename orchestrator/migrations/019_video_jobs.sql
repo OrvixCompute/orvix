@@ -1,6 +1,6 @@
 -- ============================================================================
--- Orvix Orchestrator — migration 015: video generation jobs + quota
--- Run AFTER 001-014. Idempotent. Applied via scripts/migrate.py.
+-- Orvix Orchestrator — migration 019: video generation jobs + quota
+-- Run AFTER 001-018. Idempotent. Applied via scripts/migrate.py.
 -- ============================================================================
 
 begin;

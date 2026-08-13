@@ -1,6 +1,6 @@
 -- ============================================================================
--- Orvix Orchestrator — migration 016: video in network stats
--- Run AFTER 001-015. Idempotent (create or replace / if not exists).
+-- Orvix Orchestrator — migration 020: video in network stats
+-- Run AFTER 001-019. Idempotent (create or replace / if not exists).
 --
 -- Extends network_stats(p_window_hours) from migration 014 with the video
 -- engine capability count and video job aggregates, mirroring the image block.
