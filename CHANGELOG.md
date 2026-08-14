@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 — they briefly shared a number without sharing a meaning. Published from a
 `node-v*` tag via PyPI Trusted Publishing, so no API token is involved.
 
+- **0.2.7** — pre-warm the video engine in the background at startup, so a node
+  that has been up a while serves video immediately instead of making the first
+  caller eat the full ~200s model load inside the dispatch timeout. Registration
+  is not blocked on the load; the first video request still waits if the warm-up
+  has not finished
 - **0.2.6** — the video feature shipped in repo commit `323c5cd` never made it
   into the 0.2.5 wheel: PyPI 0.2.5's protocol lacks `job.video.dispatch`, so a
   node installed from PyPI rejects video jobs with a union-tag validation error.

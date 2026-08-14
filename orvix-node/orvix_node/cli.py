@@ -162,6 +162,28 @@ async def _run_agent(cfg) -> None:
         async with manager.serving(engines["image"].supported_models[0]):
             pass
 
+    # Pre-warm the video engine in the background. Unlike chat/image this is
+    # deliberately NOT awaited at startup: on a dedicated video node it loads
+    # ~200s of weights, and blocking registration on that would keep the node
+    # offline for minutes. Loading it in the background means the first video
+    # request is still cold (it waits for the load like before), but a node
+    # that has been up a while serves video immediately instead of making the
+    # first caller eat the full model load inside the dispatch timeout.
+    if "video" in engines:
+        async def _video_prewarm() -> None:
+            try:
+                async with manager.serving(engines["video"].supported_models[0]):
+                    pass
+                logger.info("Video engine pre-warmed and resident.")
+            except Exception as exc:  # noqa: BLE001 — startup must not die on this
+                logger.warning("Video pre-warm failed (will load on demand): {}", exc)
+
+        video_prewarm_task = asyncio.create_task(
+            _video_prewarm(), name="video-prewarm"
+        )
+    else:
+        video_prewarm_task = None
+
     # Background task: unload the resident engine after it goes idle.
     async def _idle_loop() -> None:
         while True:
@@ -248,6 +270,8 @@ async def _run_agent(cfg) -> None:
     await client.stop()
     idle_task.cancel()
     sweep_task.cancel()
+    if video_prewarm_task is not None:
+        video_prewarm_task.cancel()
     await executor.shutdown()
     await health.stop()
     if client_task in done and client_task.exception():
