@@ -88,6 +88,49 @@ class Settings(BaseSettings):
         False, description="Start the withdrawal payout worker on startup"
     )
 
+    # --- OpenCovenant trust (optional; opt-in node attestation) ------------
+    # OpenCovenant exposes on-chain trust facts (wallet reputation, agent
+    # identity, attestation verify) over a remote MCP. All tools are read-only
+    # and need no credentials. This is strictly opt-in: when the URL is left at
+    # its default and the feature flag is off, node registration behaves
+    # exactly as before — the attestation never runs and nothing blocks.
+    COVENANT_MCP_URL: str = Field(
+        "https://mcp.opencovenant.org/mcp",
+        description="Remote MCP endpoint for OpenCovenant trust checks",
+    )
+    COVENANT_MCP_TIMEOUT_S: float = Field(
+        10.0, description="Timeout for each OpenCovenant MCP call"
+    )
+    COVENANT_MIN_REPUTATION: int = Field(
+        0,
+        description=(
+            "Minimum covenant_reputation score a node needs to register when "
+            "COVENANT_ENABLE_ATTESTATION is true (0 disables the gate entirely; "
+            "the check then runs but never rejects). A score of 0 means the "
+            "wallet has no on-chain settlement history yet."
+        ),
+    )
+    COVENANT_ENABLE_ATTESTATION: bool = Field(
+        False,
+        description=(
+            "When true, node registration runs an OpenCovenant reputation "
+            "check against the provider's wallet. Defaults to false so the "
+            "existing registration flow is untouched. The check is fail-soft: "
+            "a network error or timeout records 'no attestation' but never "
+            "blocks registration. Requires COVENANT_PROVIDER_WALLET_ADDRESS to "
+            "resolve the provider's wallet."
+        ),
+    )
+    COVENANT_PROVIDER_WALLET_ADDRESS: str = Field(
+        "",
+        description=(
+            "Solana wallet used for covenant_reputation checks on node "
+            "registration (a provider's wallet, e.g. their treasury address). "
+            "Empty disables the check even when COVENANT_ENABLE_ATTESTATION is "
+            "true."
+        ),
+    )
+
     # --- Staking / tokenomics (whitepaper alignment) -----------------------
     ALLOW_MOCK_INFERENCE: bool = Field(
         False,
