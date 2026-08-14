@@ -21,6 +21,7 @@ from typing import AsyncIterator, Optional
 from app.config import settings
 from app.database import get_supabase
 from app.logger import logger
+from app.services.covenant_service import CovenantService, get_covenant_service
 from app.models.protocol import (
     ImageJobCompleteMessage,
     ImageJobDispatchMessage,
@@ -83,6 +84,9 @@ class NodeConnection:
     models_supported: list[str] = field(default_factory=list)
     engines: list[str] = field(default_factory=list)  # e.g. ["chat", "image"]
     vram_gb: float = 0.0
+    # Result of the OpenCovenant attestation at registration, when enabled.
+    # None means attestation is disabled or could not be obtained (fail-soft).
+    attestation: Optional[dict] = None
     pending_jobs: dict[str, PendingJob] = field(default_factory=dict)
     _send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -129,6 +133,52 @@ class NodeManager:
             raise ValueError("node_id is registered to another provider")
         return claimed
 
+    async def _run_covenant_attestation(
+        self, provider_id: str, wallet: str
+    ) -> dict | None:
+        """Run the OpenCovenant reputation check for a provider's wallet.
+
+        Fail-soft by construction: a network error, timeout, or unexpected
+        response yields a dict with ``attested: False`` and a reason, never an
+        exception. Only a genuinely clean check with a score at or above
+        ``COVENANT_MIN_REPUTATION`` produces ``attested: True``. The result is
+        stored on the nodes row for the provider's audit trail.
+        """
+        service: CovenantService = get_covenant_service()
+        result = await service.check_reputation(wallet)
+        if not result.ok:
+            return {
+                "attested": False,
+                "provider_id": provider_id,
+                "wallet": wallet,
+                "reason": result.error or "check failed",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+        rep = result.reputation
+        if rep is None:
+            return {
+                "attested": False,
+                "provider_id": provider_id,
+                "wallet": wallet,
+                "reason": "no reputation data",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+        min_score = settings.COVENANT_MIN_REPUTATION
+        attested = rep.score >= min_score
+        return {
+            "attested": attested,
+            "provider_id": provider_id,
+            "wallet": wallet,
+            "score": rep.score,
+            "tier": rep.tier,
+            "settled_jobs": rep.settled_jobs,
+            "distinct_counterparties": rep.distinct_counterparties,
+            "volume_micro_usdc": rep.volume_micro_usdc,
+            "min_score": min_score,
+            "reason": "ok" if attested else "score below threshold",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     async def register_node(self, websocket, msg: RegisterMessage) -> NodeConnection:
         db = get_supabase()
 
@@ -159,6 +209,21 @@ class NodeManager:
         # `engines`/`vram_gb` are optional (older nodes omit them). Default the
         # engine list to ["chat"] so pre-capability nodes still serve chat.
         engines = list(msg.engines) if msg.engines else ["chat"]
+
+        # Opt-in OpenCovenant attestation. Off by default; when enabled (flag +
+        # wallet configured) it runs a fail-soft reputation check against the
+        # provider's wallet and stores the verdict on the row. A network error,
+        # timeout, or sub-threshold score never blocks registration — it just
+        # records "no attestation", so existing nodes keep working unchanged.
+        attestation = None
+        if settings.COVENANT_ENABLE_ATTESTATION and settings.COVENANT_PROVIDER_WALLET_ADDRESS:
+            try:
+                attestation = await self._run_covenant_attestation(
+                    msg.provider_id, settings.COVENANT_PROVIDER_WALLET_ADDRESS
+                )
+            except Exception as exc:  # noqa: BLE001 — attestation must never break registration
+                logger.warning("Covenant attestation failed for provider {}: {}", msg.provider_id, exc)
+
         conn = NodeConnection(
             node_id=node_id,
             provider_id=msg.provider_id,
@@ -169,23 +234,25 @@ class NodeManager:
             models_supported=list(msg.models_supported),
             engines=engines,
             vram_gb=msg.vram_gb,
+            attestation=attestation,
         )
 
         # Upsert the nodes row.
-        db.table("nodes").upsert(
-            {
-                "id": node_id,
-                "provider_id": msg.provider_id,
-                "status": "ready",
-                "gpu_model": msg.gpu_info.model,
-                "vram_mb": msg.gpu_info.vram_total_mb,
-                "models_supported": list(msg.models_supported),
-                "engines": engines,
-                "vram_gb": msg.vram_gb,
-                "max_concurrent_jobs": msg.max_concurrent_jobs,
-                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
-            }
-        ).execute()
+        row = {
+            "id": node_id,
+            "provider_id": msg.provider_id,
+            "status": "ready",
+            "gpu_model": msg.gpu_info.model,
+            "vram_mb": msg.gpu_info.vram_total_mb,
+            "models_supported": list(msg.models_supported),
+            "engines": engines,
+            "vram_gb": msg.vram_gb,
+            "max_concurrent_jobs": msg.max_concurrent_jobs,
+            "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+        }
+        if attestation:
+            row["covenant_attestation"] = attestation
+        db.table("nodes").upsert(row).execute()
 
         self.connected_nodes[node_id] = conn
         logger.info(

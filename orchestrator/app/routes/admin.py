@@ -20,6 +20,7 @@ from app.services import storage_service
 from app.services import treasury_health as treasury_health_service
 from app.services.burn_service import BurnService
 from app.services.buyback_service import BuybackService
+from app.services.covenant_service import get_covenant_service
 from app.services.hot_sweeper import hot_sweeper
 from app.services.payments_overview import build_overview
 from app.services.wallet import wallet_service
@@ -53,6 +54,9 @@ async def feature_flags():
         "min_withdraw_amount_usdc": settings.MIN_WITHDRAW_AMOUNT_USDC,
         "auto_approve_max_usdc": settings.AUTO_APPROVE_MAX_USDC,
         "max_withdrawals_per_day": settings.MAX_WITHDRAWALS_PER_DAY,
+        "covenant_enable_attestation": settings.COVENANT_ENABLE_ATTESTATION,
+        "covenant_min_reputation": settings.COVENANT_MIN_REPUTATION,
+        "covenant_wallet_configured": bool(settings.COVENANT_PROVIDER_WALLET_ADDRESS),
     }
 
 
@@ -136,3 +140,33 @@ async def payments_overview(db: Client = Depends(get_supabase)):
     last-synced values — call POST /treasury/sync first to refresh from chain.
     """
     return build_overview(db)
+
+
+# --- OpenCovenant trust (opt-in node attestation) ---------------------------
+
+@router.get("/covenant/reputation")
+async def covenant_reputation(wallet: str = ""):
+    """Live OpenCovenant reputation check for a Solana wallet (admin-only).
+
+    Read-only call to the Covenant Guard MCP (https://mcp.opencovenant.org/mcp).
+    Returns the raw tool result; a failed check (network error, timeout, or an
+    isError from the server) is reported as ``{"ok": false, "error": ...}`` and
+    never raises — matching the fail-soft registration path.
+    """
+    target = wallet or settings.COVENANT_PROVIDER_WALLET_ADDRESS
+    if not target:
+        return {"ok": False, "error": "no wallet given and COVENANT_PROVIDER_WALLET_ADDRESS is empty"}
+    result = await get_covenant_service().check_reputation(target)
+    if not result.ok:
+        return {"ok": False, "error": result.error, "wallet": target}
+    rep = result.reputation
+    return {
+        "ok": True,
+        "wallet": target,
+        "score": rep.score,
+        "tier": rep.tier,
+        "settled_jobs": rep.settled_jobs,
+        "distinct_counterparties": rep.distinct_counterparties,
+        "volume_micro_usdc": rep.volume_micro_usdc,
+        "source_fee_payer": rep.source_fee_payer,
+    }
