@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 — they briefly shared a number without sharing a meaning. Published from a
 `node-v*` tag via PyPI Trusted Publishing, so no API token is involved.
 
+- **0.2.8** — `idle_unload_minutes: 0` now disables idle unload instead of
+  unloading instantly: the resident engine stays in VRAM until the node stops.
+  For a dedicated video node this means the pre-warmed engine is always ready
+  and no request ever eats the ~200s model load
 - **0.2.7** — pre-warm the video engine in the background at startup, so a node
   that has been up a while serves video immediately instead of making the first
   caller eat the full ~200s model load inside the dispatch timeout. Registration

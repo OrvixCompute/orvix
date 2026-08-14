@@ -145,7 +145,14 @@ class ModelManager:
 
         Each unload runs with the lock released, same as :meth:`acquire`, so an
         idle-unload of one engine never blocks a request for another.
+
+        A non-positive timeout disables idle unload entirely — the resident
+        engine stays in VRAM forever. That is the right setting for a
+        single-purpose node (e.g. video) whose model load takes minutes and
+        must not be thrown away.
         """
+        if self.idle_timeout_seconds <= 0:
+            return
         async with self._cv:
             now = self._clock()
             candidates = []

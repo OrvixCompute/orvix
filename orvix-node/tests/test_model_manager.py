@@ -132,6 +132,22 @@ async def test_idle_unload_skipped_while_active():
     await mgr.release("chat")
 
 
+async def test_idle_unload_disabled_when_timeout_nonpositive():
+    # idle_timeout_seconds <= 0 keeps the engine resident forever — the
+    # single-purpose node (e.g. video) setting where a multi-minute model load
+    # must not be thrown away by the idle loop.
+    clock = Clock()
+    chat = FakeEngine("chat")
+    mgr = ModelManager({"chat": chat}, idle_timeout_seconds=0, clock=clock)
+    async with mgr.serving("qwen-2.5-7b"):
+        pass
+
+    clock.advance(10**6)  # idle for a very long time
+    await mgr.idle_check()
+    assert mgr.status()["current_engine"] == "chat"
+    assert chat.unloads == 0
+
+
 async def test_shutdown_unloads_current():
     chat = FakeEngine("chat")
     mgr = ModelManager({"chat": chat})

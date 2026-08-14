@@ -90,6 +90,9 @@ class NodeConfig(BaseModel):
     # vLLM server is managed out of band.
     vllm_managed: bool = False
     # Unload the resident engine after this many idle minutes to free VRAM.
+    # 0 disables idle unload: the resident engine stays in VRAM until the node
+    # stops. Use 0 on a single-purpose node (e.g. video) whose model load takes
+    # minutes and should not be discarded while the node is up.
     idle_unload_minutes: int = 10
     # Keep chat + image both resident in VRAM instead of swapping between
     # them. Only enable this once you've confirmed both engines' combined
@@ -226,7 +229,7 @@ enable_video_engine: false   # advertise + serve text-to-video (a clip holds the
 max_concurrent_video_jobs: 1 # never raise this without measuring VRAM for two concurrent clips
 enable_embedding_engine: false # advertise + serve embeddings (CPU by default, does not use the GPU)
 vllm_managed: false          # node owns the vLLM server subprocess (kill on unload to free VRAM)
-idle_unload_minutes: 10      # unload the resident engine after this many idle minutes
+idle_unload_minutes: 10      # unload the resident engine after this many idle minutes (0 = keep resident)
 
 # Logging:
 log_level: "INFO"
