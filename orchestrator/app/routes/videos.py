@@ -75,6 +75,16 @@ def _validate_resolution(model: str, width: int, height: int) -> None:
             f"for model '{model}'.",
             error_code="invalid_size",
         )
+    # LTX-Video (the orvix-video-1 backend) requires both dimensions to be
+    # divisible by 32. Without this check the request passes validation, burns
+    # quota, waits for the node to load the model, then fails with a ValueError
+    # on the node — the exact failure mode this function exists to prevent.
+    if width % 32 != 0 or height % 32 != 0:
+        raise ValidationError(
+            f"Resolution {width}x{height} must be a multiple of 32 for model "
+            f"'{model}' (e.g. 640x384 or 1280x704).",
+            error_code="invalid_size",
+        )
 
 
 def _max_size_for(model: str) -> str:

@@ -114,9 +114,20 @@ def test_resolution_above_model_max_400(client_and_db):
 
 
 def test_resolution_at_model_max_ok(client_and_db):
+    # 1280x704: at the catalog max width, and 704 is a multiple of 32 (the
+    # LTX-Video backend requires both dimensions divisible by 32).
     client, _ = client_and_db
-    resp = _post(client, width=1280, height=720)
+    resp = _post(client, width=1280, height=704)
     assert resp.status_code == 200, resp.text
+
+
+def test_resolution_not_multiple_of_32_400(client_and_db):
+    # 640x360 is within bounds but 360 % 32 != 0 — the node would reject it
+    # after loading the model, so it must be refused before quota is consumed.
+    client, _ = client_and_db
+    resp = _post(client, width=640, height=360)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_size"
 
 
 def test_request_bounds_enforced_by_model(client_and_db):
