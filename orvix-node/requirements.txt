@@ -1,6 +1,10 @@
 # Core runtime dependencies (CPU-only — works on any machine for development).
 # For real GPU inference install the extras: `pip install -e .[gpu]` (Linux/CUDA).
 # For image generation (Flux Schnell) install: `pip install -e .[image]` (Linux/CUDA).
+#
+# NOTE: this file is a convenience mirror for contributors. The canonical
+# dependency source is `pyproject.toml`; CI installs `pip install -e ".[dev]"`.
+# Prefer editing pyproject.toml over this file.
 click>=8.1
 loguru>=0.7
 pyyaml>=6.0

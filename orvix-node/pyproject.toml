@@ -76,7 +76,7 @@ video = [
 embed = ["sentence-transformers>=3.0"]
 # GPU detection without vLLM (works for monitoring on any NVIDIA box).
 nvml = ["pynvml>=11.5"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=6.0", "ruff>=0.15,<0.16"]
 
 [project.scripts]
 orvix-node = "orvix_node.cli:cli"
