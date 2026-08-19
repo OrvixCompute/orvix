@@ -32,6 +32,9 @@ logs/
 # Local Claude settings
 .claude/settings.local.json
 
+# Local Command Code settings / taste (never commit)
+.commandcode/
+
 # Internal reference docs (not for publication)
 reference/
 
