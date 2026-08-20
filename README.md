@@ -137,10 +137,11 @@ have early users discover it the hard way. As of this release:
   `BUYBACK_STUB`, `BURN_STUB`, default `true`). The accounting and workflows are
   implemented and tested, but no real SPL transfers are executed yet — they emit
   simulated transaction signatures. Real execution lands after devnet testing.
-- **The system is custodial, not trustless.** Staking, payouts, and treasury flows
-  are settled off-chain by an operator-controlled treasury wallet against the database.
-  **There is no on-chain program (no Solana/Anchor smart contract) yet**, so there are
-  no on-chain guarantees, escrow, or automated enforcement.
+- **Provider staking is custodial, not trustless.** Provider staking, payouts, and
+  treasury flows are settled off-chain by an operator-controlled treasury wallet against
+  the database. **There is no on-chain enforcement for the provider path** — no
+  escrow or automated slashing. (User staking is different: it runs through the
+  `staking-program/` Anchor program and is non-custodial — see below.)
 - **No on-chain slashing or output verification.** The network does not yet
   cryptographically verify that a node returned honest inference results, and there is
   no slashing/dispute mechanism. Provider trust is currently operational, not enforced.
@@ -155,6 +156,9 @@ have early users discover it the hard way. As of this release:
   agent works, but the dashboard has no provider screen: `provider_id` and
   `node_secret` still have to be obtained by calling `POST /v1/provider/register`
   by hand with a session token.
+- **Non-custodial user staking is opt-in and un-deployed.** The `staking-program/`
+  Anchor program compiles and the `/v1/staking/user/*` routes exist, but the program
+  is not deployed on-chain yet — set `USER_STAKING_PROGRAM_ID` and deploy before use.
 
 Expect breaking changes. Track progress in [CHANGELOG.md](CHANGELOG.md).
 

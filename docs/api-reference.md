@@ -323,6 +323,27 @@ Recent burns (public, no auth) — each with its Solana signature.
 Public dashboard data: total staked, provider count, buyback budget, ORVX held for
 burn, totals burned/bought, and last buyback/burn timestamps.
 
+### `POST /v1/staking/user/stake` *(non-custodial, opt-in)*
+Build an **unsigned** `stake` transaction for the user's wallet to sign.
+**Auth: JWT.** Requires `USER_STAKING_PROGRAM_ID` configured; otherwise `404`.
+Body: `{ "amount": <number>, "lock_days": 3|7|14 }`. The user signs the returned
+`transaction` (hex) in their wallet and submits it; the ORVX moves from their ATA
+into the program-owned vault.
+
+### `POST /v1/staking/user/unstake` *(non-custodial, opt-in)*
+Build an **unsigned** `unstake` transaction for the user's wallet to sign.
+**Auth: JWT.** Body: `{ "amount": <number> }`. Only succeeds on-chain once the
+lock period has passed; partial unstakes are allowed.
+
+### `POST /v1/staking/user/submit` *(non-custodial, opt-in)*
+Broadcast a user-signed transaction (hex, from `/stake` or `/unstake`) to the
+network. **Auth: JWT.** Body: `{ "transaction": "<hex>" }`. Returns
+`{ "signature": "<base58>" }` once accepted by the RPC.
+
+### `GET /v1/staking/user/status` *(non-custodial, opt-in)*
+Read the user's on-chain `StakeAccount` (staked ORVX, lock deadline) and the
+derived tier. **Auth: JWT.**
+
 ---
 
 ## Governance

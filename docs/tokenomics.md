@@ -36,6 +36,14 @@ Providers must stake at least **2,000,000 ORVX** — **0.2% of the fixed
 (off-chain ledger) in v1**, moving **on-chain in v2**. Stake is deposited via a
 memo'd transfer to the treasury and credited automatically.
 
+### User staking (non-custodial)
+Users can lock ORVX directly in the Orvix staking program (`staking-program/`,
+an Anchor v2 program) for a chosen lock period (3 / 7 / 14 days). Tokens sit in
+a program-owned vault that no operator key can move; unstaking is only possible
+after the lock expires. Tier is derived from the on-chain `StakeAccount` PDA,
+so staking for utility works without trusting the operator with custody.
+Opt-in via `USER_STAKING_PROGRAM_ID`.
+
 The figure is set while the token is early and the stake is inexpensive in
 dollar terms, and is expected to be revisited as market cap grows — it is a
 configuration value (`PROVIDER_MIN_STAKE_ORVX`), not a protocol constant. Two

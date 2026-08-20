@@ -1,0 +1,22 @@
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[package]
+name = "orvix-staking"
+version = "0.1.0"
+description = "Orvix non-custodial user staking program"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+anchor-lang = "2.0.0-rc.1"
+anchor-spl = "2.0.0-rc.1"
+wincode = "0.5"
+spl-token = { version = "6", features = ["no-entrypoint"] }

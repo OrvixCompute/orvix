@@ -46,6 +46,7 @@ from app.routes import (
     node,
     provider,
     staking,
+    user_staking,
     videos,
 )
 from app.services.node_manager import node_manager
@@ -110,6 +111,7 @@ app.include_router(billing.router)
 app.include_router(node.router)
 app.include_router(provider.router)
 app.include_router(staking.router)
+app.include_router(user_staking.router)
 app.include_router(account.router)
 app.include_router(admin.router)
 app.include_router(governance.router)

@@ -342,6 +342,21 @@ class Settings(BaseSettings):
         24, description="Rolling window for the *_window counters in /v1/network/stats"
     )
 
+    # --- Non-custodial user staking (Anchor program) ------------------------
+    # Empty disables the /v1/staking/user/* endpoints (404 "not configured").
+    USER_STAKING_PROGRAM_ID: str = Field(
+        "", description="Anchor program ID for non-custodial user staking (base58)"
+    )
+    USER_STAKING_LOCK_DAYS: int = Field(
+        7, description="Default lock period (days) offered when staking (3/7/14 allowed)"
+    )
+    USER_STAKING_VAULT_SEED: str = Field(
+        "vault", description="PDA seed for the program-owned ORVX vault"
+    )
+    USER_STAKING_STAKE_SEED: str = Field(
+        "stake", description="PDA seed for per-user StakeAccount"
+    )
+
     # --- Governance (Snapshot.org) -----------------------------------------
     GOVERNANCE_SNAPSHOT_SPACE: str = Field(
         "orvix", description="Snapshot space slug for ORVX governance"

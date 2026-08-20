@@ -1,0 +1,4 @@
+# Build artifacts (compiled .so, IDL, fingerprints)
+target/
+# Program keypairs — NEVER commit
+*.json
