@@ -450,6 +450,37 @@ class Settings(BaseSettings):
             "Off by default because it multiplies RPC cost on every wallet scan."
         ),
     )
+    INTEL_AI_MODEL: str = Field(
+        "qwen-2.5-7b",
+        description=(
+            "Chat model used by the token-intelligence analysis. The analysis is "
+            "dispatched to a GPU node over the normal job path; when no node serves "
+            "the model the analysis degrades to null instead of failing."
+        ),
+    )
+    INTEL_AI_MAX_TOKENS: int = Field(
+        300, description="Max completion tokens for a token-intelligence analysis"
+    )
+    INTEL_AI_TEMPERATURE: float = Field(
+        0.3, description="Sampling temperature for token-intelligence analysis"
+    )
+
+    # --- Social intelligence (X/Twitter, DexScreener) -----------------------
+    SOCIAL_CACHE_TTL_SECONDS: int = Field(
+        300, description="How long social analysis results are cached"
+    )
+    X_BEARER_TOKEN: str = Field(
+        "",
+        description=(
+            "Twitter/X API v2 bearer token. When set, social analysis includes "
+            "tweet volume, follower count, and engagement metrics. Empty disables "
+            "X/Twitter data (DexScreener data still works without a token)."
+        ),
+    )
+    DEXSCREENER_API_URL: str = Field(
+        "https://api.dexscreener.com/latest/dex",
+        description="DexScreener API base URL for token social/volume data",
+    )
 
     # --- Parsed helpers ----------------------------------------------------
     @staticmethod

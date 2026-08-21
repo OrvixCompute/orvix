@@ -42,6 +42,12 @@ class FakeSolana:
     async def get_token_balance(self, owner, mint):
         return self.token_balances.get((owner, mint), Decimal(0))
 
+    async def get_token_largest_accounts(self, mint):
+        return []
+
+    async def get_token_account_owner(self, account):
+        return None
+
     async def get_signatures_for_address(self, address, limit=25, until=None, before=None):
         self.calls["signatures"] += 1
         return self.signatures
@@ -70,7 +76,7 @@ async def test_scan_token_returns_fields(monkeypatch, ctx, sol):
     assert result["price_usdc"] == 1.23
     assert result["liquidity"]["pool_count"] == 0
     assert result["liquidity"]["estimated_usdc"] is None
-    assert result["holders"] is None
+    assert result["holders"]["top_holders"] == []  # no accounts resolvable
     assert isinstance(result["risk"]["warnings"], list)
 
 

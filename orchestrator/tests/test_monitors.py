@@ -290,3 +290,41 @@ async def test_refresh_holder_snapshots_refreshes_monitored_tokens(monkeypatch):
 
     await svc.refresh_holder_snapshots()
     assert refreshed == ["mint-a", "mint-b"]
+
+
+@pytest.mark.asyncio
+async def test_token_monitor_evaluation_runs_ai_analysis(monkeypatch):
+    """A due token monitor dispatches AI intelligence to the GPU network."""
+    analyzed = []
+
+    async def fake_intel(_db, mint):
+        analyzed.append(mint)
+        return {"analysis": {"narrative": "x"}}
+
+    async def fake_accumulation(_db, mint, **kwargs):
+        return {"score": 10, "label": "weak"}
+
+    monkeypatch.setattr(monitor_service, "intel_ai", type("I", (), {"generate_token_intelligence": staticmethod(fake_intel)})())
+    fake_ti = type("T", (), {"compute_accumulation": staticmethod(fake_accumulation)})()
+    monkeypatch.setattr(monitor_service, "token_intel", fake_ti)
+
+    db = FakeAlertDb()
+    monitor = _monitor(target_type="token", conditions=[{"type": "accumulation_score", "gte": 70}])
+    await svc._evaluate_monitor(db, monitor)
+    assert analyzed == [monitor["target_address"]]
+
+
+@pytest.mark.asyncio
+async def test_wallet_monitor_evaluation_skips_ai_analysis(monkeypatch):
+    """Wallet monitors do not generate token intelligence."""
+    analyzed = []
+
+    async def fake_intel(_db, mint):
+        analyzed.append(mint)
+
+    monkeypatch.setattr(monitor_service, "intel_ai", type("I", (), {"generate_token_intelligence": staticmethod(fake_intel)})())
+
+    db = FakeAlertDb()
+    monitor = _monitor(target_type="wallet", conditions=[{"type": "new_activity"}])
+    await svc._evaluate_monitor(db, monitor)
+    assert analyzed == []

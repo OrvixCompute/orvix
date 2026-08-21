@@ -47,6 +47,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one allowance) because they spend external Solana RPC + Jupiter budget.
 - **`GET /v1/agents/alerts`**: all of a user's alert events across monitors,
   newest first; both alert endpoints now paginate with `limit`/`offset`.
+- **AI intelligence layer** (`GET /v1/tokens/{ca}/intelligence`): scan +
+  accumulation results are dispatched as a chat job to an ORVX GPU node
+  (`INTEL_AI_MODEL`), which writes a narrative/risk summary — the "ORVIX AI"
+  step of the pipeline. Fail-soft without a node (503 no_chat_provider); the
+  job row is recorded (`is_mock=false`) so network stats show real compute
+  served. The monitor worker also runs this analysis for every due token
+  monitor, so each monitoring cycle is real GPU demand — the flywheel.
+- **Real holder enumeration + early buyers**: `GET /v1/tokens/{ca}/holders`
+  resolves the mint's largest token accounts to owner wallets
+  (`getTokenLargestAccounts` + owner lookup) for a genuine top-holder
+  distribution and `top10_share`, falling back to the watchlist snapshot when
+  RPC cannot resolve them; `GET /v1/tokens/{ca}/early-buyers` pages each top
+  holder's history to find their first detected buy (oldest first). Solana
+  service gained `get_token_largest_accounts` + `get_token_account_owner`.
+- **Social intelligence** (`GET /v1/tokens/{ca}/social`): DexScreener data
+  (social links, volume, trending status, price change) + optional Twitter/X
+  API v2 metrics (followers, tweet volume) combined into a 0–100 social score.
+  Sentiment heuristic from available signals. Fail-soft when APIs are
+  unreachable; cached in `intel_scans`. New config: `SOCIAL_CACHE_TTL_SECONDS`,
+  `X_BEARER_TOKEN`, `DEXSCREENER_API_URL`.
+- **Wallet clustering** (`GET /v1/tokens/{ca}/clusters`): detects coordinated
+  wallet clusters among top holders using three signals — shared SOL funding
+  source, coordinated buy timing (±60s window), and overlapping token holdings
+  (Jaccard similarity ≥ 0.5). Signals merged via union-find; each cluster
+  reports confidence (0–1) based on signal count.
+- **Enhanced narrative detection**: `GET /v1/tokens/{ca}/intelligence` now
+  includes social signals (DexScreener trending, volume, Twitter followers,
+  sentiment) in the AI prompt when available, producing richer narratives that
+  combine on-chain and social data.
 
 ### Node package (PyPI)
 

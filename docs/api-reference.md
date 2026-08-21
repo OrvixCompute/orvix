@@ -374,6 +374,75 @@ across watchlist wallets, distinct buy transfers, top-10 holder concentration,
 and per-component scores. **Auth: JWT or API key.** Rate-limited like the scan
 endpoint.
 
+### `GET /v1/tokens/{ca}/holders`
+Real top-holder distribution for a mint, resolved to owner wallets via
+`getTokenLargestAccounts` + per-account owner lookup: `{ total_holders,
+top_holders: [{wallet, token_account, balance}], top10_share, as_of }`.
+Falls back to the watchlist snapshot when RPC cannot resolve accounts.
+**Auth: JWT or API key.** Rate-limited like the scan endpoint.
+
+### `GET /v1/tokens/{ca}/early-buyers`
+First-buy evidence for the current top holders — for each, the earliest
+detected incoming transfer of the mint is found by paging its wallet history.
+Sorted oldest-buy first. **Auth: JWT or API key.** Rate-limited.
+
+### `GET /v1/tokens/{ca}/social`
+Social media analysis for a token: DexScreener data (social links, 24h volume,
+trending status, price change) + optional Twitter/X API v2 metrics (followers,
+tweet volume) combined into a 0–100 social score with sentiment heuristic.
+**Auth: JWT or API key.** Rate-limited. Cached for `SOCIAL_CACHE_TTL_SECONDS`.
+
+```json
+{
+  "mint": "...",
+  "social_links": { "twitter": "https://x.com/...", "website": "https://...", "telegram": null, "discord": null },
+  "social_score": 55,
+  "metrics": {
+    "dex_trending": true,
+    "dex_volume_24h": 10000.0,
+    "dex_price_change_24h": 5.0,
+    "twitter_followers": 2000,
+    "twitter_statuses_7d": 15,
+    "social_sentiment": "positive"
+  },
+  "as_of": "2026-08-20T00:00:00Z"
+}
+```
+
+Social score weights: DexScreener trending (+30), volume spike (+20),
+Twitter followers >1000 (+15), Twitter activity >10 tweets/7d (+15),
+social links present (+10 each, max +20). Capped at 100.
+
+### `GET /v1/tokens/{ca}/clusters`
+Detect coordinated wallet clusters among top holders using three signals:
+- **Shared funding** — wallets funded by the same SOL source
+- **Coordinated timing** — first buys within ±60 seconds
+- **Overlapping holdings** — Jaccard similarity ≥ 0.5 on held mints
+
+Signals are merged via union-find. Each cluster reports confidence (0–1) based
+on how many signals matched. **Auth: JWT or API key.** Rate-limited.
+
+```json
+{
+  "mint": "...",
+  "clusters": [
+    { "id": "abc123", "wallets": ["w1...", "w2..."],
+      "signals": ["shared_funding", "coordinated_timing"], "confidence": 0.67 }
+  ],
+  "total_wallets_analyzed": 20,
+  "as_of": "2026-08-20T00:00:00Z"
+}
+```
+
+### `GET /v1/tokens/{ca}/intelligence`
+AI-written analysis of the token — the "ORVIX AI" layer. The scan +
+accumulation results are dispatched as a chat job to an ORVX GPU node
+(`INTEL_AI_MODEL`), which returns a JSON summary: `narrative` (emerging market
+picture), `risk_flags`, and `watch_next`. Results are cached; the job row is
+recorded (`is_mock=false`) so network stats reflect the real compute served.
+**Auth: JWT or API key.** Returns `503 no_chat_provider` when no node serves
+the model, `503 capacity_exhausted` when all are busy.
+
 ### `GET /v1/wallets/{wallet}?mint=<ca>`
 Wallet analysis: token holdings (capped at `MAX_TOKEN_ACCOUNTS_PER_WALLET`),
 recent activity (capped at `MAX_WALLET_TX_PARSE` parsed txs), and — when

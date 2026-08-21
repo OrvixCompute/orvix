@@ -191,7 +191,15 @@ async def scan_token(db: Client, ca: str) -> dict:
     price = await get_token_price_usdc(ca)
 
     liquidity_usdc, pool_count = await _estimate_liquidity(sol, ca)
-    holders = await _load_holder_snapshot(db, ca)
+    # Real holder distribution when RPC can resolve it, else the watchlist
+    # snapshot. Imported lazily: holder_intel imports this module.
+    from app.services.holder_intel import top_holders
+
+    try:
+        holders = await top_holders(db, ca)
+    except Exception as exc:  # noqa: BLE001 — fall back to the cached snapshot
+        logger.warning("top_holders failed for {}: {}", ca, exc)
+        holders = await _load_holder_snapshot(db, ca)
 
     payload = {
         "mint": ca,

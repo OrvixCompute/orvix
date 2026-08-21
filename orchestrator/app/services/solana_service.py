@@ -113,6 +113,34 @@ class SolanaService:
             return None
         return result["value"]
 
+    async def get_token_largest_accounts(self, mint: str) -> list[dict]:
+        """The largest token accounts of a mint (max ~20), ranked by balance.
+
+        Each item: {"address", "amount", "decimals", "uiAmountString"}. This is
+        the closest plain RPC gets to a holder list — the accounts still need to
+        be resolved to their owners via get_token_account_owner.
+        """
+        try:
+            result = await self._rpc("getTokenLargestAccounts", [mint])
+        except RuntimeError:
+            return []
+        return (result or {}).get("value", []) or []
+
+    async def get_token_account_owner(self, token_account: str) -> Optional[str]:
+        """Owner wallet of a token account (jsonParsed getAccountInfo)."""
+        try:
+            result = await self._rpc(
+                "getAccountInfo", [token_account, {"encoding": "jsonParsed"}]
+            )
+        except RuntimeError:
+            return None
+        if not result or not result.get("value"):
+            return None
+        try:
+            return result["value"]["data"]["parsed"]["info"]["owner"]
+        except (KeyError, TypeError):
+            return None
+
     async def get_token_balance(self, owner: str, mint: str) -> Decimal:
         """Total UI balance of `mint` held by `owner` across its token accounts."""
         total = Decimal(0)

@@ -40,7 +40,7 @@ from supabase import Client
 from app.config import settings
 from app.database import get_supabase
 from app.logger import logger
-from app.services import token_intel
+from app.services import intel_ai, token_intel
 from app.services.solana_service import get_solana_service
 
 TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
@@ -208,6 +208,19 @@ class MonitorService:
         conditions = monitor.get("conditions") or []
         if not isinstance(conditions, list):
             conditions = []
+
+        # A due token monitor generates AI intelligence on the GPU network —
+        # this is the product's flywheel: every monitoring cycle is real
+        # compute demand. Fail-soft: a missing node only skips the analysis.
+        if target_type == "token":
+            try:
+                await intel_ai.generate_token_intelligence(db, monitor["target_address"])
+            except Exception as exc:  # noqa: BLE001 — analysis is additive
+                logger.warning(
+                    "Monitor {} intelligence generation failed: {}",
+                    monitor.get("id"),
+                    exc,
+                )
 
         for cond in conditions:
             if not isinstance(cond, dict):

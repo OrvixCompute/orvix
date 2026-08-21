@@ -45,10 +45,32 @@ class TokenHolderSnapshot(BaseModel):
     as_of: Optional[datetime] = None
 
 
+class EarlyBuyerEntry(BaseModel):
+    wallet: str
+    amount: float = Field(..., description="UI amount of the first detected buy")
+    signature: str = Field(..., description="Transaction of the first detected buy")
+    block_time: Optional[int] = Field(None, description="Unix timestamp of the first buy")
+
+
 class TokenRisk(BaseModel):
     warnings: list[str] = Field(
         default_factory=list, description="Human-readable risk flags, e.g. no metadata / high concentration"
     )
+
+
+class TokenIntelligenceAnalysis(BaseModel):
+    narrative: str = Field(..., description="AI-written market picture / emerging narrative")
+    risk_flags: list[str] = Field(default_factory=list)
+    watch_next: str = Field("", description="What to watch next, per the model")
+
+
+class TokenIntelligenceResponse(BaseModel):
+    mint: str
+    model: str = Field(..., description="Chat model that produced the analysis")
+    analysis: TokenIntelligenceAnalysis
+    generated_at: datetime
+    latency_ms: Optional[int] = Field(None, description="Node round-trip time")
+    node_id: Optional[str] = Field(None, description="GPU node that served the analysis")
 
 
 class TokenScanResponse(BaseModel):
@@ -193,3 +215,43 @@ class WebhookTestResponse(BaseModel):
     ok: bool
     status_code: Optional[int] = None
     error: Optional[str] = None
+
+
+# --- social intelligence ---------------------------------------------------
+
+class SocialMetrics(BaseModel):
+    dex_trending: bool = False
+    dex_volume_24h: Optional[float] = Field(None, description="24h trading volume in USD from DexScreener")
+    dex_price_change_24h: Optional[float] = Field(None, description="24h price change percentage")
+    twitter_followers: Optional[int] = None
+    twitter_statuses_7d: Optional[int] = Field(None, description="Tweets in the last 7 days")
+    social_sentiment: Optional[str] = Field(None, description="positive | neutral | negative")
+
+
+class SocialAnalysisResponse(BaseModel):
+    mint: str
+    social_links: dict[str, Optional[str]] = Field(
+        default_factory=dict, description="{twitter, website, telegram, discord}"
+    )
+    social_score: int = Field(0, ge=0, le=100, description="Composite social activity score")
+    metrics: SocialMetrics = Field(default_factory=SocialMetrics)
+    as_of: datetime
+
+
+# --- wallet clustering -----------------------------------------------------
+
+class WalletCluster(BaseModel):
+    id: str = Field(..., description="Cluster identifier")
+    wallets: list[str] = Field(..., description="Wallets in this cluster")
+    signals: list[str] = Field(
+        default_factory=list,
+        description="Clustering signals: shared_funding, coordinated_timing, overlapping_holdings",
+    )
+    confidence: float = Field(..., ge=0, le=1, description="Cluster confidence based on signal count")
+
+
+class WalletClusterResponse(BaseModel):
+    mint: str
+    clusters: list[WalletCluster] = Field(default_factory=list)
+    total_wallets_analyzed: int
+    as_of: datetime
