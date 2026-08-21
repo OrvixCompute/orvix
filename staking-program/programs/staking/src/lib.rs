@@ -20,12 +20,22 @@ declare_id!("CS4CWHL4DeSvbqZaUzT9AgK47VWweg94Ta2FZokvJZSg");
 // enforced against the clock at unstake time.
 pub const LOCK_PERIODS_DAYS: [i64; 3] = [3, 7, 14];
 pub const VAULT_SEED: &[u8] = b"vault";
+pub const VAULT_AUTHORITY_SEED: &[u8] = b"vault_authority";
 pub const STAKE_SEED: &[u8] = b"stake";
 pub const SECONDS_PER_DAY: i64 = 86_400;
 
 #[program]
 pub mod orvix_staking {
     use super::*;
+
+    /// Create the program-owned vault token account (idempotent). Must run
+    /// once before any stake: the vault is the PDA at seeds ["vault"], with
+    /// its token authority the PDA at seeds ["vault_authority"].
+    pub fn initialize_vault(ctx: &mut Context<InitializeVault>) -> Result<()> {
+        // token::init_... happens in the account constraints; nothing to do
+        // here beyond ensuring the mint matches.
+        Ok(())
+    }
 
     /// Lock `amount` ORVX for `lock_days` (3 / 7 / 14). Adds to any existing
     /// stake; the lock deadline extends to the later of the current deadline
@@ -81,7 +91,7 @@ pub mod orvix_staking {
 
         stake.amount = stake.amount.checked_sub(amount).ok_or(ErrorCode::Overflow)?;
 
-        let signer_seeds: &[&[&[u8]]] = &[&[VAULT_SEED, &[ctx.bumps.vault_authority]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[VAULT_AUTHORITY_SEED, &[ctx.bumps.vault_authority]]];
 
         token::transfer_checked(
             CpiContext::new(
@@ -112,6 +122,31 @@ pub struct StakeAccount {
     /// Unix timestamp (seconds) before which unstaking is refused.
     pub stake_locked_until: PodI64,
     pub created_at: PodI64,
+}
+
+#[derive(Accounts)]
+pub struct InitializeVault {
+    #[account(mut)]
+    pub payer: Signer,
+
+    /// Program-owned vault token account, created at its PDA.
+    #[account(
+        init,
+        payer = payer,
+        seeds = [VAULT_SEED],
+        bump,
+        token::mint = mint,
+        token::authority = vault_authority,
+    )]
+    pub vault: Account<TokenAccount>,
+
+    /// PDA that is the vault's token authority (signs CPI transfers).
+    #[account(seeds = [VAULT_AUTHORITY_SEED], bump)]
+    pub vault_authority: UncheckedAccount,
+
+    pub mint: Account<Mint>,
+    pub token_program: Program<Token>,
+    pub system_program: Program<System>,
 }
 
 #[derive(Accounts)]
@@ -147,7 +182,7 @@ pub struct Stake {
     pub vault: Account<TokenAccount>,
 
     /// PDA that is the vault's token authority (signs CPI transfers).
-    #[account(seeds = [VAULT_SEED], bump)]
+    #[account(seeds = [VAULT_AUTHORITY_SEED], bump)]
     pub vault_authority: UncheckedAccount,
 
     pub mint: Account<Mint>,
@@ -186,7 +221,7 @@ pub struct Unstake {
     pub vault: Account<TokenAccount>,
 
     /// PDA that is the vault's token authority (signs CPI transfers).
-    #[account(seeds = [VAULT_SEED], bump)]
+    #[account(seeds = [VAULT_AUTHORITY_SEED], bump)]
     pub vault_authority: UncheckedAccount,
 
     pub mint: Account<Mint>,

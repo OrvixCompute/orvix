@@ -34,6 +34,7 @@ def _discriminator(namespace: str, name: str) -> bytes:
 
 STAKE_DISCRIMINATOR = _discriminator("global", "stake")
 UNSTAKE_DISCRIMINATOR = _discriminator("global", "unstake")
+INITIALIZE_VAULT_DISCRIMINATOR = _discriminator("global", "initialize_vault")
 
 # SPL Token program (legacy) and the associated-token program.
 TOKEN_PROGRAM_ID = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
@@ -65,8 +66,7 @@ def stake_vault_address() -> Pubkey:
 
 def stake_vault_authority_address() -> Pubkey:
     """PDA that is the vault token account's authority (signs CPI transfers)."""
-    # Same seed as the vault; used as a separate signer account in the program.
-    addr, _ = _pda([settings.USER_STAKING_VAULT_SEED.encode()])
+    addr, _ = _pda([settings.USER_STAKING_VAULT_AUTHORITY_SEED.encode()])
     return addr
 
 
@@ -97,6 +97,40 @@ class UserStakingService:
         return get_solana_service()
 
     # --- transaction building ----------------------------------------------
+    async def build_initialize_vault_transaction(self, wallet: str) -> dict:
+        """Return an unsigned `initialize_vault` transaction (operator action).
+
+        Creates the program-owned vault token account at its PDA if it does not
+        exist yet. Safe to run multiple times: the Anchor constraint is `init`
+        on a PDA with a fixed address, so a second call fails with the account
+        already initialized rather than corrupting anything.
+        """
+        owner = Pubkey.from_string(wallet)
+        mint = Pubkey.from_string(settings.ORVX_MINT_ADDRESS)
+        vault = stake_vault_address()
+        vault_authority = stake_vault_authority_address()
+
+        accounts = [
+            AccountMeta(owner, is_signer=True, is_writable=True),
+            AccountMeta(vault, is_signer=False, is_writable=True),
+            AccountMeta(vault_authority, is_signer=False, is_writable=False),
+            AccountMeta(mint, is_signer=False, is_writable=False),
+            AccountMeta(TOKEN_PROGRAM_ID, is_signer=False, is_writable=False),
+            AccountMeta(SYSTEM_PROGRAM_ID, is_signer=False, is_writable=False),
+        ]
+        data = INITIALIZE_VAULT_DISCRIMINATOR
+        ix = Instruction(_program_id(), data, accounts)
+
+        blockhash = await self.sol.get_latest_blockhash()
+        msg = Message.new_with_blockhash([ix], owner, Hash.from_string(blockhash))
+        tx = Transaction.new_unsigned(msg)
+        return {
+            "transaction": bytes(tx).hex(),
+            "blockhash": blockhash,
+            "vault_address": str(vault),
+            "program_id": str(_program_id()),
+        }
+
     async def build_stake_transaction(
         self, wallet: str, amount: Decimal, lock_days: int
     ) -> dict:

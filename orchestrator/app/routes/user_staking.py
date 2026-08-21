@@ -16,6 +16,7 @@ from app.models.user_staking import (
     UserStakeRequest,
     UserStakeStatusResponse,
     UserUnstakeRequest,
+    VaultInitializeResponse,
 )
 from app.services.user_staking import user_staking_service
 
@@ -25,6 +26,23 @@ router = APIRouter(prefix="/v1/staking/user", tags=["staking"])
 def _require_enabled() -> None:
     if not settings.USER_STAKING_PROGRAM_ID:
         raise HTTPException(status_code=404, detail="user staking is not configured")
+
+
+@router.post("/initialize-vault", response_model=VaultInitializeResponse)
+async def user_initialize_vault(
+    current_user: dict = Depends(get_current_user),
+):
+    """Build an unsigned `initialize_vault` transaction (operator action).
+
+    Creates the program-owned vault token account at its PDA. Run once per mint
+    before any stake can land; calling it twice fails with the account already
+    initialized, which is safe.
+    """
+    _require_enabled()
+    wallet = current_user.get("wallet_address")
+    if not wallet:
+        raise HTTPException(status_code=400, detail="account has no wallet_address")
+    return await user_staking_service.build_initialize_vault_transaction(wallet)
 
 
 @router.post("/stake", response_model=StakeTransactionResponse)

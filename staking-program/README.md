@@ -15,19 +15,21 @@ owns the vault; no operator key can move staked tokens.
 - `StakeAccount` PDA — seeds `["stake", owner]`; zero-copy Pod layout:
   `owner: Address`, `amount: PodU64`, `stake_locked_until: PodI64`,
   `created_at: PodI64`.
-- Vault — token account PDA at seeds `["vault"]`; its authority is the
-  `["vault"]`-seeded PDA (same seed, separate signer slot).
+- Vault — token account PDA at seeds `["vault"]`; its authority is a
+  **separate** PDA at seeds `["vault_authority"]` (distinct addresses, so the
+  account list has no duplicate mutable accounts).
 
 ## Build
 
 The bundled `anchor` CLI ships a Rust toolchain too old for the current
 dependency tree (solana-program 2.x needs Rust 1.85+). Use `build.sh`, which
-builds with the Solana platform-tools toolchain (rustc 1.89) against the
-`sbpfv1` target and stages the artifact where `anchor deploy` expects it:
+invokes the official `cargo-build-sbf` from the solana 3.1.10 release
+(platform-tools rustc 1.89) and stages the artifact where `anchor deploy`
+expects it:
 
 ```bash
 ./build.sh
-# -> target/deploy/orvix_staking.so  (SBPF ELF, loader-compatible)
+# -> target/deploy/orvix_staking.so  (SBPF ELF, devnet-verifier-compatible)
 ```
 
 The on-chain program ID is `CS4CWHL4DeSvbqZaUzT9AgK47VWweg94Ta2FZokvJZSg`
@@ -41,9 +43,31 @@ keypairs**).
 anchor deploy --program-name orvix_staking --provider.cluster devnet
 ```
 
-`anchor deploy` runs `solana program deploy` against the staged `.so`. On a
-machine without devnet DNS/network access this fails with a connection error
-after passing the ELF verifier — the artifact itself is valid.
+Status: **deployed** to devnet at slot 486061628 (owner
+`BPFLoaderUpgradeab1e11111111111111111111111`, upgrade authority is the
+deploying wallet). Subsequent deploys are upgrades to the same program ID.
+
+## Initialize the vault
+
+Before any stake can land, the program-owned vault token account must exist
+at its PDA (`seeds ["vault"]`, authority `seeds ["vault_authority"]`). Run
+`initialize_vault` once per mint (idempotent; caller pays the ATA rent):
+
+```bash
+# via the orchestrator service:
+#   POST /v1/staking/user/initialize-vault   (admin/operator)
+# or build+submit the instruction with the deployed program's `initialize_vault`
+```
+
+Until the vault exists, `stake` fails with an account-not-found constraint
+error rather than moving funds — safe by construction.
+
+## Lock periods
+
+`stake` accepts `lock_days` in {3, 7, 14}. The deadline stored on the
+`StakeAccount` is `max(current_deadline, now + lock_days)`, so topping up never
+shortens an existing commitment. `unstake` refuses while
+`now < stake_locked_until` (custom error `StakeLocked`).
 
 ## Tests
 

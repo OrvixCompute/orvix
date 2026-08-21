@@ -155,6 +155,17 @@ def test_amount_scaling_uses_decimals(ctx):
 
 
 # --- submit ----------------------------------------------------------------
+def test_initialize_vault_transaction(ctx):
+    client, _ = ctx
+    resp = client.post("/v1/staking/user/initialize-vault")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["program_id"] == PROGRAM_ID
+    assert body["vault_address"]  # PDA vault address returned
+    raw = bytes.fromhex(body["transaction"])
+    assert raw  # non-empty serialized tx
+
+
 def test_submit_transaction_broadcasts(ctx):
     client, fake_sol = ctx
     signed_hex = "deadbeef" * 16

@@ -25,6 +25,15 @@ class StakeTransactionResponse(BaseModel):
     program_id: str
 
 
+class VaultInitializeResponse(BaseModel):
+    """An unsigned `initialize_vault` transaction (operator action)."""
+
+    transaction: str = Field(description="Hex-encoded unsigned serialized transaction")
+    blockhash: str
+    vault_address: str
+    program_id: str
+
+
 class SubmitTransactionRequest(BaseModel):
     transaction: str = Field(description="Hex-encoded signed transaction from the user's wallet")
 
