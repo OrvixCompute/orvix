@@ -39,13 +39,19 @@ keypairs**).
 ## Deploy (devnet)
 
 ```bash
-./build.sh
-anchor deploy --program-name orvix_staking --provider.cluster devnet
+./deploy.sh            # builds + deploys to devnet
+./deploy.sh --mainnet  # mainnet-beta
 ```
+
+`deploy.sh` checks the wallet balance (needs ~1 SOL for the deploy buffer)
+before paying any fees, then runs `anchor deploy` against the staged `.so`.
 
 Status: **deployed** to devnet at slot 486061628 (owner
 `BPFLoaderUpgradeab1e11111111111111111111111`, upgrade authority is the
 deploying wallet). Subsequent deploys are upgrades to the same program ID.
+The binary with the vault-authority seed fix and `initialize_vault` is staged
+and ready to redeploy; it is blocked only by the devnet faucet daily rate
+limit (wallet holds 0.41 SOL, deploy wants ~1).
 
 ## Initialize the vault
 
