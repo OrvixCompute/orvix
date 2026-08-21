@@ -11,7 +11,6 @@ rather than exceptions.  Results are cached via the shared two-tier cache
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
