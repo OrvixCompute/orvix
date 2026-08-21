@@ -39,8 +39,24 @@ def check(api_key_id: str, tier: str, *, bucket: str = "chat") -> None:
     429 tells the caller what they have rather than only that they exceeded it.
     """
     limit = tier_service.rate_limit_for_tier(tier)
+    _check_with_limit(api_key_id, tier, limit, bucket=bucket)
+
+
+def check_user(user_id: str, tier: str, *, bucket: str) -> None:
+    """Rate-limit a user id (JWT-authenticated routes) under a named bucket.
+
+    Intel scan endpoints spend external RPC budget (Solana + Jupiter), so they
+    are throttled even though they do not bill. The key is the user id so both
+    auth schemes (JWT and API key) share one allowance per account.
+    """
+    limit = tier_service.rate_limit_for_tier(tier)
+    _check_with_limit(user_id, tier, limit, bucket=bucket)
+
+
+def _check_with_limit(key: str, tier: str, limit: int, *, bucket: str) -> None:
+    """Shared enforcement for both keyed forms (API key id or user id)."""
     now = time.monotonic()
-    q = _hits[(api_key_id, bucket)]
+    q = _hits[(key, bucket)]
     while q and now - q[0] > RATE_WINDOW:
         q.popleft()
     if len(q) >= limit:

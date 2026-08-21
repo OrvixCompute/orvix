@@ -364,12 +364,15 @@ Full token profile for a Solana mint: metadata (Metaplex on-chain, when
 present), supply, USDC price (Jupiter), liquidity estimate (only for pools
 listed in `TOKEN_POOLS_JSON`), cached holder snapshot, and a risk summary.
 **Auth: JWT or API key.** Results are cached for
-`INTEL_SCAN_CACHE_TTL_SECONDS`.
+`INTEL_SCAN_CACHE_TTL_SECONDS`. Scan endpoints share a per-account
+per-minute rate limit (the `intel` bucket) because they spend external
+RPC/Jupiter budget.
 
 ### `GET /v1/tokens/{ca}/accumulation`
 Accumulation score (0–100) + metrics for a mint over a 7-day window: net inflow
 across watchlist wallets, distinct buy transfers, top-10 holder concentration,
-and per-component scores. **Auth: JWT or API key.**
+and per-component scores. **Auth: JWT or API key.** Rate-limited like the scan
+endpoint.
 
 ### `GET /v1/wallets/{wallet}?mint=<ca>`
 Wallet analysis: token holdings (capped at `MAX_TOKEN_ACCOUNTS_PER_WALLET`),
@@ -407,8 +410,13 @@ type. **Auth: JWT.**
 ### `DELETE /v1/agents/monitors/{id}`
 Delete a monitor; its alert events cascade. **Auth: JWT.** Returns `204`.
 
+### `GET /v1/agents/alerts`
+All of the current user's alert events across every monitor, newest first.
+**Auth: JWT.** Query params: `limit` (default 50, max 200), `offset`.
+
 ### `GET /v1/agents/monitors/{id}/alerts`
 Alert events for one monitor, newest first (owner only). **Auth: JWT.**
+Paginated with `limit`/`offset` (defaults 50/0).
 
 ### `POST /v1/agents/monitors/{id}/test`
 Send a sample alert payload to the monitor's webhook (no event row is written).

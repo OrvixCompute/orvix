@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Optional holding metadata** (`RESOLVE_HOLDING_METADATA`): wallet analysis
   resolves each holding's on-chain name/symbol via the Metaplex metadata
   program (one extra RPC per holding; off by default).
+- **Intel scan rate limit**: token/wallet scan endpoints share a per-account
+  `intel` rate-limit bucket (keyed by user id so JWT and API-key auth share
+  one allowance) because they spend external Solana RPC + Jupiter budget.
+- **`GET /v1/agents/alerts`**: all of a user's alert events across monitors,
+  newest first; both alert endpoints now paginate with `limit`/`offset`.
 
 ### Node package (PyPI)
 

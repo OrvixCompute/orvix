@@ -325,3 +325,90 @@ def test_patch_monitor_reset_baseline_rejected_without_price_condition(ctx, monk
         json={"reset_baseline": True},
     )
     assert bad.status_code == 400
+
+
+def _seed_alerts(db, user, monitor_id, n=3):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    for i in range(n):
+        db.table("alert_events").insert(
+            {
+                "monitor_id": monitor_id,
+                "user_id": user["id"],
+                "condition_type": "accumulation_score",
+                "message": f"alert {i}",
+                "payload": {"i": i},
+                "dedup_key": f"acc:{i}",
+                "occurred_at": (now - timedelta(minutes=i)).isoformat(),
+            }
+        ).execute()
+
+
+def test_global_alerts_endpoint(ctx):
+    """GET /v1/agents/alerts returns the user's alerts across monitors."""
+    client, db = ctx
+    user = db.add_user()
+    other = db.add_user()
+
+    resp = client.post(
+        "/v1/agents/monitors",
+        headers=_auth_header(user),
+        json={
+            "target_type": "token",
+            "target_address": str(Pubkey.new_unique()),
+            "conditions": [{"type": "accumulation_score", "gte": 70}],
+        },
+    )
+    monitor_id = resp.json()["id"]
+    _seed_alerts(db, user, monitor_id, n=2)
+    # Another user's alert must not leak in.
+    db.table("alert_events").insert(
+        {
+            "monitor_id": monitor_id,
+            "user_id": other["id"],
+            "condition_type": "new_activity",
+            "message": "other user's alert",
+            "payload": {},
+            "dedup_key": "other",
+            "occurred_at": "2026-08-20T00:00:00Z",
+        }
+    ).execute()
+
+    alerts = client.get("/v1/agents/alerts", headers=_auth_header(user))
+    assert alerts.status_code == 200
+    body = alerts.json()
+    assert len(body) == 2
+    # Newest first.
+    assert body[0]["message"] == "alert 0"
+
+
+def test_alerts_pagination(ctx):
+    client, db = ctx
+    user = db.add_user()
+    resp = client.post(
+        "/v1/agents/monitors",
+        headers=_auth_header(user),
+        json={
+            "target_type": "token",
+            "target_address": str(Pubkey.new_unique()),
+            "conditions": [{"type": "accumulation_score", "gte": 70}],
+        },
+    )
+    monitor_id = resp.json()["id"]
+    _seed_alerts(db, user, monitor_id, n=5)
+
+    page1 = client.get(
+        f"/v1/agents/monitors/{monitor_id}/alerts?limit=2&offset=0",
+        headers=_auth_header(user),
+    ).json()
+    page2 = client.get(
+        f"/v1/agents/monitors/{monitor_id}/alerts?limit=2&offset=2",
+        headers=_auth_header(user),
+    ).json()
+    assert len(page1) == 2
+    assert len(page2) == 2
+    ids1 = {a["id"] for a in page1}
+    ids2 = {a["id"] for a in page2}
+    assert ids1.isdisjoint(ids2)
+    assert len(ids1 | ids2) == 4

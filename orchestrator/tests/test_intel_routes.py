@@ -135,3 +135,41 @@ def test_wallet_analysis_endpoint(ctx, monkeypatch):
     assert body["wallet"]
     assert body["holdings"] == []
     assert body["recent_activity"][0]["signature"] == "s1"
+
+
+def test_intel_endpoints_are_rate_limited(ctx, monkeypatch):
+    """Scan endpoints share an 'intel' bucket per user; exceeding it -> 429."""
+    from app.services import rate_limit_service, tier_service
+
+    client, db, user = ctx
+    key = _seed_api_key(db, user)
+
+    class FakeSol:
+        async def get_token_supply(self, mint):
+            return {"amount": "1000000000", "decimals": 6, "uiAmountString": "1000.0"}
+
+        async def get_account_info(self, address, encoding="base64"):
+            return None
+
+        async def get_signatures_for_address(self, address, limit=25, until=None, before=None):
+            return []
+
+    async def _no_price(mint):
+        return None
+
+    monkeypatch.setattr(token_intel, "get_solana_service", lambda: FakeSol())
+    monkeypatch.setattr(token_intel, "get_token_price_usdc", _no_price)
+    # Bronze normally allows 60/min; shrink it so the test trips quickly.
+    monkeypatch.setitem(tier_service.TIER_RATE_LIMITS, "bronze", 2)
+    rate_limit_service.reset()
+
+    headers = {"Authorization": f"Bearer {key}"}
+    mint = str(Pubkey.new_unique())
+    # Two requests fit within the limit...
+    assert client.get(f"/v1/tokens/{mint}", headers=headers).status_code == 200
+    assert client.get(f"/v1/tokens/{mint}", headers=headers).status_code == 200
+    # ...the third is throttled (bucket shared across scan endpoints).
+    resp = client.get(f"/v1/tokens/{mint}/accumulation", headers=headers)
+    assert resp.status_code == 429
+    assert resp.json()["error"]["bucket"] == "intel"
+    rate_limit_service.reset()

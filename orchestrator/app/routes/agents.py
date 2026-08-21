@@ -8,7 +8,7 @@ carries a webhook_url, alerts are POSTed there with retry.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from solders.pubkey import Pubkey
 from supabase import Client
 
@@ -214,33 +214,55 @@ async def update_monitor(
     return _monitor_response(updated.data[0])
 
 
-@router.get("/monitors/{monitor_id}/alerts", response_model=list[AlertEventResponse])
-async def list_monitor_alerts(
-    monitor_id: str,
+def _alert_response(r: dict) -> dict:
+    return {
+        "id": str(r["id"]),
+        "monitor_id": str(r["monitor_id"]),
+        "condition_type": r.get("condition_type"),
+        "message": r.get("message"),
+        "payload": r.get("payload") or {},
+        "occurred_at": r.get("occurred_at"),
+    }
+
+
+@router.get("/alerts", response_model=list[AlertEventResponse])
+async def list_all_alerts(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user),
     db: Client = Depends(get_supabase),
 ):
-    """Alert events for one monitor, newest first (owner only)."""
+    """All of the current user's alert events across monitors, newest first."""
+    res = (
+        db.table("alert_events")
+        .select("*")
+        .eq("user_id", current_user["id"])
+        .order("occurred_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    return [_alert_response(r) for r in res.data or []]
+
+
+@router.get("/monitors/{monitor_id}/alerts", response_model=list[AlertEventResponse])
+async def list_monitor_alerts(
+    monitor_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Alert events for one monitor, newest first (owner only). Paginated."""
     _get_owned_monitor(db, monitor_id, current_user["id"])
     res = (
         db.table("alert_events")
         .select("*")
         .eq("monitor_id", monitor_id)
         .order("occurred_at", desc=True)
-        .limit(100)
+        .range(offset, offset + limit - 1)
         .execute()
     )
-    return [
-        {
-            "id": str(r["id"]),
-            "monitor_id": str(r["monitor_id"]),
-            "condition_type": r.get("condition_type"),
-            "message": r.get("message"),
-            "payload": r.get("payload") or {},
-            "occurred_at": r.get("occurred_at"),
-        }
-        for r in res.data or []
-    ]
+    return [_alert_response(r) for r in res.data or []]
 
 
 @router.post("/monitors/{monitor_id}/test", response_model=WebhookTestResponse)
