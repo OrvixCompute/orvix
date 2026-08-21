@@ -33,6 +33,7 @@ from app.middleware import register_middleware
 from app.routes import (
     account,
     admin,
+    agents,
     api_keys,
     auth,
     billing,
@@ -46,12 +47,15 @@ from app.routes import (
     node,
     provider,
     staking,
+    tokens,
     user_staking,
     videos,
+    wallets,
 )
 from app.services.node_manager import node_manager
 from app.services.payment_listener import payment_listener
 from app.services.payout_service import payout_service
+from app.services.monitor_service import monitor_service
 from app.services.solana_service import get_solana_service
 
 
@@ -77,6 +81,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Payout worker disabled (set ENABLE_PAYOUT_WORKER=true to enable)")
 
+    if settings.ENABLE_MONITOR_WORKER:
+        await monitor_service.start()
+    else:
+        logger.info("Monitor worker disabled (set ENABLE_MONITOR_WORKER=true to enable)")
+
     yield
 
     logger.info("Shutting down...")
@@ -84,6 +93,8 @@ async def lifespan(app: FastAPI):
         await payment_listener.stop()
     if settings.ENABLE_PAYOUT_WORKER:
         await payout_service.stop()
+    if settings.ENABLE_MONITOR_WORKER:
+        await monitor_service.stop()
     await node_manager.shutdown()
     await get_solana_service().close()
 
@@ -111,8 +122,11 @@ app.include_router(billing.router)
 app.include_router(node.router)
 app.include_router(provider.router)
 app.include_router(staking.router)
+app.include_router(tokens.router)
+app.include_router(wallets.router)
 app.include_router(user_staking.router)
 app.include_router(account.router)
 app.include_router(admin.router)
+app.include_router(agents.router)
 app.include_router(governance.router)
 app.include_router(network.router)

@@ -346,6 +346,73 @@ derived tier. **Auth: JWT.**
 
 ---
 
+## Token Intelligence
+
+Token/CA scans, wallet analysis, accumulation detection, monitoring agents and
+webhook alerts. Data comes from plain Solana JSON-RPC + the Jupiter quote API —
+no third-party analytics providers. Because plain RPC cannot enumerate a mint's
+holders or page a mint's transfer history, holder/whale analysis is anchored on
+`TOKEN_WHALE_WATCHLIST_JSON` (tracked wallets) and on holder snapshots cached by
+earlier scans. Fields the data sources cannot answer return `null`/`[]`.
+
+Holder snapshots are refreshed automatically for monitored tokens by the
+monitor worker (`INTEL_HOLDER_SNAPSHOT_TTL_SECONDS`, default 3600s) and can be
+refreshed manually via `POST /v1/admin/intel/holder-snapshot?mint=<ca>`.
+
+### `GET /v1/tokens/{ca}`
+Full token profile for a Solana mint: metadata (Metaplex on-chain, when
+present), supply, USDC price (Jupiter), liquidity estimate (only for pools
+listed in `TOKEN_POOLS_JSON`), cached holder snapshot, and a risk summary.
+**Auth: JWT or API key.** Results are cached for
+`INTEL_SCAN_CACHE_TTL_SECONDS`.
+
+### `GET /v1/tokens/{ca}/accumulation`
+Accumulation score (0–100) + metrics for a mint over a 7-day window: net inflow
+across watchlist wallets, distinct buy transfers, top-10 holder concentration,
+and per-component scores. **Auth: JWT or API key.**
+
+### `GET /v1/wallets/{wallet}?mint=<ca>`
+Wallet analysis: token holdings (capped at `MAX_TOKEN_ACCOUNTS_PER_WALLET`),
+recent activity (capped at `MAX_WALLET_TX_PARSE` parsed txs), and — when
+`mint` is given — buy/inflow history for that mint. **Auth: JWT or API key.**
+
+### `POST /v1/agents/monitors`
+Create a monitoring agent. **Auth: JWT.**
+Body: `{ "name", "target_type": "token"|"wallet", "target_address", "conditions":
+[{...}], "webhook_url"?, "interval_minutes"?, "is_active"? }`.
+
+Supported conditions (validated per target type):
+- `token` — `{"type":"accumulation_score","gte":70}`, `{"type":"price_drop_pct","gte":10}`, `{"type":"large_transfer","min_ui_amount":1000}`
+- `wallet` — `{"type":"new_activity"}`, `{"type":"large_inflow","min_ui_amount":5000}`
+
+A `price_drop_pct` monitor snapshots the current price as its baseline at
+creation. Evaluation runs in the background worker (`ENABLE_MONITOR_WORKER`).
+Alerts are deduplicated per day (score/price conditions) or per on-chain
+signature (transfer/activity conditions).
+
+### `GET /v1/agents/monitors`
+List the current user's monitors, newest first. **Auth: JWT.**
+
+### `GET /v1/agents/monitors/{id}`
+Get one monitor (owner only; 404 for other users' monitors). **Auth: JWT.**
+
+### `DELETE /v1/agents/monitors/{id}`
+Delete a monitor; its alert events cascade. **Auth: JWT.** Returns `204`.
+
+### `GET /v1/agents/monitors/{id}/alerts`
+Alert events for one monitor, newest first (owner only). **Auth: JWT.**
+
+### `POST /v1/agents/monitors/{id}/test`
+Send a sample alert payload to the monitor's webhook (no event row is written).
+**Auth: JWT.** Returns `{ "ok", "status_code"?, "error"? }`.
+
+When a monitor has a `webhook_url`, each alert is POSTed to it as JSON
+(`{ event_id, monitor_id, condition_type, message, payload, occurred_at }`)
+with exponential backoff (`WEBHOOK_RETRY_BASE_SECONDS`, capped at
+`WEBHOOK_MAX_ATTEMPTS`).
+
+---
+
 ## Governance
 
 ### `GET /v1/governance/snapshot-url`

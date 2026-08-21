@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables via pydantic-settings."""
 
+import json
 from decimal import Decimal
 from functools import lru_cache
 from typing import List
@@ -353,6 +354,9 @@ class Settings(BaseSettings):
     USER_STAKING_VAULT_SEED: str = Field(
         "vault", description="PDA seed for the program-owned ORVX vault"
     )
+    USER_STAKING_VAULT_AUTHORITY_SEED: str = Field(
+        "vault_authority", description="PDA seed for the vault's token authority (signs CPI)"
+    )
     USER_STAKING_STAKE_SEED: str = Field(
         "stake", description="PDA seed for per-user StakeAccount"
     )
@@ -364,6 +368,114 @@ class Settings(BaseSettings):
     GOVERNANCE_SNAPSHOT_URL: str = Field(
         "https://snapshot.box/#/orvix", description="Public Snapshot space URL"
     )
+
+    # --- Token intelligence (scans, accumulation, monitors, webhooks) ------
+    # The token-intel layer works with plain Solana JSON-RPC only. Mint
+    # addresses do not appear in ordinary transfer transactions and plain RPC
+    # cannot enumerate a mint's holders, so holder/whale analysis is anchored on
+    # explicit watchlists rather than chain-wide enumeration.
+    TOKEN_METADATA_PROGRAM_ID: str = Field(
+        "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
+        description="Metaplex token-metadata program ID (metadata PDA derivation)",
+    )
+    TOKEN_POOLS_JSON: str = Field(
+        "",
+        description=(
+            "JSON mapping mint -> list of liquidity-pool token-account addresses, "
+            "e.g. {\"mint...\": [\"poolAta...\"]}. Used to estimate a token's "
+            "liquidity from on-chain balances. Empty disables the liquidity estimate."
+        ),
+    )
+    TOKEN_WHALE_WATCHLIST_JSON: str = Field(
+        "",
+        description=(
+            "JSON array of wallet addresses tracked for accumulation / large-transfer "
+            "analysis, e.g. [\"wallet...\"]. Empty disables whale inflow metrics."
+        ),
+    )
+    INTEL_SCAN_CACHE_TTL_SECONDS: int = Field(
+        600, description="How long token/wallet/accumulation scan results are cached"
+    )
+    INTEL_HOLDER_SNAPSHOT_TTL_SECONDS: int = Field(
+        3600,
+        description=(
+            "How often the monitor worker refreshes holder snapshots for monitored "
+            "tokens (0 disables automatic refresh; POST /v1/admin/intel/holder-snapshot "
+            "always works)"
+        ),
+    )
+    MAX_TOKEN_ACCOUNTS_PER_WALLET: int = Field(
+        25, description="Cap on token accounts listed in a wallet analysis"
+    )
+    MAX_WALLET_TX_PARSE: int = Field(
+        5, description="Cap on parsed transactions in a wallet's recent activity"
+    )
+
+    # --- Monitor agents + webhook alerts -----------------------------------
+    ENABLE_MONITOR_WORKER: bool = Field(
+        False, description="Start the monitor evaluation + webhook delivery worker"
+    )
+    MONITOR_WORKER_INTERVAL_SECONDS: int = Field(
+        120, description="Monitor worker loop cadence"
+    )
+    MONITOR_MAX_PER_CYCLE: int = Field(
+        50, description="Monitors evaluated per worker cycle"
+    )
+    MONITOR_DEFAULT_INTERVAL_MINUTES: int = Field(
+        30, description="Default evaluation interval for monitors that don't set one"
+    )
+    WEBHOOK_MAX_ATTEMPTS: int = Field(
+        5, description="Webhook delivery attempts before the delivery is marked failed"
+    )
+    WEBHOOK_RETRY_BASE_SECONDS: int = Field(
+        30, description="Webhook backoff base: attempt n waits 2^(n-1) * base seconds"
+    )
+    WEBHOOK_TIMEOUT_SECONDS: int = Field(
+        10, description="Timeout per webhook delivery request"
+    )
+
+    # --- Parsed helpers ----------------------------------------------------
+    @staticmethod
+    def _parse_json_list(raw: str, name: str) -> list[str]:
+        """Parse a JSON-array config value into a list. Invalid JSON -> []."""
+        if not raw.strip():
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(x) for x in parsed if x]
+
+    @staticmethod
+    def _parse_json_dict(raw: str, name: str) -> dict[str, list[str]]:
+        """Parse a JSON-object config value into {key: [values]}. Invalid -> {}."""
+        if not raw.strip():
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        out: dict[str, list[str]] = {}
+        for key, val in parsed.items():
+            if isinstance(val, list):
+                out[str(key)] = [str(x) for x in val if x]
+            else:
+                out[str(key)] = [str(val)]
+        return out
+
+    @property
+    def token_whale_watchlist(self) -> list[str]:
+        """Parsed TOKEN_WHALE_WATCHLIST_JSON wallet list."""
+        return self._parse_json_list(self.TOKEN_WHALE_WATCHLIST_JSON, "TOKEN_WHALE_WATCHLIST_JSON")
+
+    @property
+    def token_pools(self) -> dict[str, list[str]]:
+        """Parsed TOKEN_POOLS_JSON mapping mint -> pool token-account addresses."""
+        return self._parse_json_dict(self.TOKEN_POOLS_JSON, "TOKEN_POOLS_JSON")
 
     @field_validator("ENVIRONMENT")
     @classmethod

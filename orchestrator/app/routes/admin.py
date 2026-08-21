@@ -57,6 +57,11 @@ async def feature_flags():
         "covenant_enable_attestation": settings.COVENANT_ENABLE_ATTESTATION,
         "covenant_min_reputation": settings.COVENANT_MIN_REPUTATION,
         "covenant_wallet_configured": bool(settings.COVENANT_PROVIDER_WALLET_ADDRESS),
+        "enable_monitor_worker": settings.ENABLE_MONITOR_WORKER,
+        "intel_scan_cache_ttl_seconds": settings.INTEL_SCAN_CACHE_TTL_SECONDS,
+        "intel_holder_snapshot_ttl_seconds": settings.INTEL_HOLDER_SNAPSHOT_TTL_SECONDS,
+        "whale_watchlist_configured": bool(settings.token_whale_watchlist),
+        "pools_configured": bool(settings.token_pools),
     }
 
 
@@ -170,3 +175,21 @@ async def covenant_reputation(wallet: str = ""):
         "volume_micro_usdc": rep.volume_micro_usdc,
         "source_fee_payer": rep.source_fee_payer,
     }
+
+
+@router.post("/intel/holder-snapshot")
+async def refresh_holder_snapshot(
+    mint: str,
+    db: Client = Depends(get_supabase),
+):
+    """Rebuild a mint's holder snapshot from the whale watchlist (admin-only).
+
+    Plain Solana RPC cannot enumerate a mint's holders, so the snapshot is
+    seeded from TOKEN_WHALE_WATCHLIST_JSON: each watchlist wallet's balance of
+    the mint is read and stored as a ranked top-holder list. The result is
+    merged into the token-scan cache so /v1/tokens/{ca} and /accumulation
+    report it immediately. Returns the snapshot.
+    """
+    from app.services import token_intel
+
+    return await token_intel.refresh_holder_snapshot(db, mint)

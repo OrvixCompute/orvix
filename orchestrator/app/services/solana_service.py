@@ -81,6 +81,38 @@ class SolanaService:
         )
         return (result or {}).get("value", []) or []
 
+    async def get_account_info(self, address: str, encoding: str = "base64") -> Optional[dict]:
+        """Raw account data for `address`, or None when the account does not exist.
+
+        Used to read program-owned accounts (e.g. the Metaplex metadata PDA for
+        a token mint). The default base64 encoding matches what the metadata
+        parser expects.
+        """
+        try:
+            result = await self._rpc(
+                "getAccountInfo", [address, {"encoding": encoding}]
+            )
+        except RuntimeError:
+            # getAccountInfo returns an RPC error for a missing account rather
+            # than a null result on some providers.
+            return None
+        if not result:
+            return None
+        value = result.get("value")
+        if not value:
+            return None
+        return value
+
+    async def get_token_supply(self, mint: str) -> Optional[dict]:
+        """Mint supply info: {"amount", "decimals", "uiAmountString"} or None."""
+        try:
+            result = await self._rpc("getTokenSupply", [mint])
+        except RuntimeError:
+            return None
+        if not result or not result.get("value"):
+            return None
+        return result["value"]
+
     async def get_token_balance(self, owner: str, mint: str) -> Decimal:
         """Total UI balance of `mint` held by `owner` across its token accounts."""
         total = Decimal(0)

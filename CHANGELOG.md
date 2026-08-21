@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Token intelligence layer** (orchestrator): `GET /v1/tokens/{ca}` returns a
+  token profile (Metaplex metadata, supply, Jupiter USDC price, configured-pool
+  liquidity, cached holder snapshot, risk warnings); `GET /v1/tokens/{ca}/accumulation`
+  scores 7-day accumulation 0–100 from watchlist wallets + holder concentration;
+  `GET /v1/wallets/{wallet}?mint=` analyzes holdings, recent activity and
+  per-mint buy history. All scans are cached (`intel_scans` table, migrations
+  022–024) and degrade gracefully — fields plain Solana JSON-RPC cannot answer
+  come back `null`/`[]` (no holder enumeration, no mint-wide transfer history).
+- **Monitoring agents**: `POST/GET/DELETE /v1/agents/monitors` + `GET .../alerts`
+  let users deploy 24/7 monitors on a token or wallet with conditions
+  (accumulation-score threshold, price-drop %, large transfer/inflow, new
+  activity). A background worker (`ENABLE_MONITOR_WORKER`) evaluates them with
+  per-day / per-signature dedup and per-monitor cursors; alert delivery is
+  opt-in via `webhook_url` with exponential-backoff retries (outbox table).
+- New config: `TOKEN_METADATA_PROGRAM_ID`, `TOKEN_POOLS_JSON`,
+  `TOKEN_WHALE_WATCHLIST_JSON`, `INTEL_SCAN_CACHE_TTL_SECONDS`,
+  `INTEL_HOLDER_SNAPSHOT_TTL_SECONDS`, `MAX_TOKEN_ACCOUNTS_PER_WALLET`,
+  `MAX_WALLET_TX_PARSE`, `ENABLE_MONITOR_WORKER`,
+  `MONITOR_WORKER_INTERVAL_SECONDS`, `MONITOR_MAX_PER_CYCLE`,
+  `MONITOR_DEFAULT_INTERVAL_MINUTES`, `WEBHOOK_*`.
+- **Holder snapshots** (`POST /v1/admin/intel/holder-snapshot?mint=`): seeds a
+  mint's top-holder list + `top10_share` from `TOKEN_WHALE_WATCHLIST_JSON`
+  balances, so accumulation scoring has a real distribution component. The
+  monitor worker refreshes snapshots automatically for monitored tokens
+  (`INTEL_HOLDER_SNAPSHOT_TTL_SECONDS`).
+
 ### Node package (PyPI)
 
 `orvix-node` has its own version line, separate from this repository's `v*` tags
