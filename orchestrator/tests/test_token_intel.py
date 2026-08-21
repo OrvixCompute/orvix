@@ -222,6 +222,70 @@ async def test_analyze_wallet_holdings_and_activity(monkeypatch, ctx, sol):
 
 
 @pytest.mark.asyncio
+async def test_holdings_resolve_metadata_when_enabled(monkeypatch, ctx, sol):
+    """RESOLVE_HOLDING_METADATA fills symbol/name per holding."""
+    wallet = str(Pubkey.new_unique())
+    mint_a = str(Pubkey.new_unique())
+    sol.accounts_by_owner = [
+        {
+            "account": {
+                "data": {
+                    "parsed": {
+                        "info": {"mint": mint_a, "tokenAmount": {"uiAmount": 7.0}}
+                    }
+                }
+            }
+        }
+    ]
+    sol.metadata_account = None  # FakeSolana default; override per mint below
+    monkeypatch.setattr(token_intel, "get_solana_service", lambda: sol)
+    monkeypatch.setattr(token_intel.settings, "RESOLVE_HOLDING_METADATA", True)
+
+    async def fake_fetch_metadata(_sol, mint):
+        if mint == mint_a:
+            return {"name": "Orvix Token", "symbol": "ORVX", "uri": None,
+                    "update_authority": None, "mint": mint}
+        return None
+
+    monkeypatch.setattr(token_intel.token_metadata, "fetch_metadata", fake_fetch_metadata)
+
+    result = await token_intel.analyze_wallet(None, wallet)
+    assert result["holdings"][0]["symbol"] == "ORVX"
+    assert result["holdings"][0]["name"] == "Orvix Token"
+
+
+@pytest.mark.asyncio
+async def test_holdings_skip_metadata_when_disabled(monkeypatch, ctx, sol):
+    wallet = str(Pubkey.new_unique())
+    mint_a = str(Pubkey.new_unique())
+    sol.accounts_by_owner = [
+        {
+            "account": {
+                "data": {
+                    "parsed": {
+                        "info": {"mint": mint_a, "tokenAmount": {"uiAmount": 7.0}}
+                    }
+                }
+            }
+        }
+    ]
+    monkeypatch.setattr(token_intel, "get_solana_service", lambda: sol)
+    monkeypatch.setattr(token_intel.settings, "RESOLVE_HOLDING_METADATA", False)
+
+    called = {"n": 0}
+
+    async def fake_fetch_metadata(_sol, mint):
+        called["n"] += 1
+        return None
+
+    monkeypatch.setattr(token_intel.token_metadata, "fetch_metadata", fake_fetch_metadata)
+
+    result = await token_intel.analyze_wallet(None, wallet)
+    assert result["holdings"][0]["symbol"] is None
+    assert called["n"] == 0
+
+
+@pytest.mark.asyncio
 async def test_refresh_holder_snapshot_from_watchlist(monkeypatch, ctx, sol):
     """Refresh derives top holders from the watchlist and writes the cache."""
     mint = str(Pubkey.new_unique())

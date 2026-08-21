@@ -396,6 +396,14 @@ List the current user's monitors, newest first. **Auth: JWT.**
 ### `GET /v1/agents/monitors/{id}`
 Get one monitor (owner only; 404 for other users' monitors). **Auth: JWT.**
 
+### `PATCH /v1/agents/monitors/{id}`
+Update a monitor (owner only). All fields optional — only the provided ones
+change: `{ "name"?, "conditions"?, "webhook_url"?, "is_active"?,
+"interval_minutes"?, "reset_baseline"? }`. `reset_baseline: true` re-snapshots
+the baseline price of a token monitor with a `price_drop_pct` condition to the
+current market price. New conditions are validated against the monitor's target
+type. **Auth: JWT.**
+
 ### `DELETE /v1/agents/monitors/{id}`
 Delete a monitor; its alert events cascade. **Auth: JWT.** Returns `204`.
 
@@ -409,7 +417,10 @@ Send a sample alert payload to the monitor's webhook (no event row is written).
 When a monitor has a `webhook_url`, each alert is POSTed to it as JSON
 (`{ event_id, monitor_id, condition_type, message, payload, occurred_at }`)
 with exponential backoff (`WEBHOOK_RETRY_BASE_SECONDS`, capped at
-`WEBHOOK_MAX_ATTEMPTS`).
+`WEBHOOK_MAX_ATTEMPTS`). When `WEBHOOK_SIGNING_SECRET` is set, every delivery
+carries an `X-Orvix-Signature` header — the hex HMAC-SHA256 of the raw JSON
+body, sorted keys, compact separators — so receivers can authenticate the
+sender.
 
 ---
 

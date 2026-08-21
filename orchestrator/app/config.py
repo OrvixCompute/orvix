@@ -433,6 +433,23 @@ class Settings(BaseSettings):
     WEBHOOK_TIMEOUT_SECONDS: int = Field(
         10, description="Timeout per webhook delivery request"
     )
+    WEBHOOK_SIGNING_SECRET: str = Field(
+        "",
+        description=(
+            "HMAC-SHA256 signing secret for webhook deliveries. When set, every "
+            "delivery includes an X-Orvix-Signature header (hex HMAC of the raw "
+            "JSON body); receivers verify it to authenticate the sender. Empty "
+            "disables signing."
+        ),
+    )
+    RESOLVE_HOLDING_METADATA: bool = Field(
+        False,
+        description=(
+            "When true, wallet analysis resolves each holding's on-chain name/symbol "
+            "via the Metaplex metadata program (one extra RPC per holding, capped). "
+            "Off by default because it multiplies RPC cost on every wallet scan."
+        ),
+    )
 
     # --- Parsed helpers ----------------------------------------------------
     @staticmethod

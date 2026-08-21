@@ -338,13 +338,22 @@ def _build_risk(
 # --- wallet analysis -------------------------------------------------------
 
 async def analyze_wallet(db: Client, wallet: str, mint: Optional[str] = None) -> dict:
-    """Wallet profile: holdings, recent activity, optional per-mint buy history."""
-    cached = _cache_get("wallet", wallet + (f":{mint}" if mint else ""))
+    """Wallet profile: holdings, recent activity, optional per-mint buy history.
+
+    Cached like the other scans: in-memory first, then the intel_scans table,
+    so a repeat call avoids Solana RPC work across restarts.
+    """
+    cache_key = "wallet" + (f":{mint}" if mint else "")
+    cached = _cache_get("wallet", cache_key)
     if cached is not None:
+        return cached
+    cached = _db_cache_get(db, "wallet", cache_key)
+    if cached is not None:
+        _cache_put("wallet", cache_key, cached)
         return cached
 
     sol = get_solana_service()
-    holdings, symbols = await _load_holdings(sol, wallet)
+    holdings = await _load_holdings(sol, wallet)
     activity = await _load_activity(sol, wallet)
     buy_history = []
     if mint:
@@ -357,12 +366,19 @@ async def analyze_wallet(db: Client, wallet: str, mint: Optional[str] = None) ->
         "buy_history": buy_history,
         "analyzed_at": _now_iso(),
     }
-    _cache_put("wallet", wallet + (f":{mint}" if mint else ""), payload)
+    _cache_put("wallet", cache_key, payload)
+    _db_cache_put(db, "wallet", cache_key, payload)
     return payload
 
 
-async def _load_holdings(sol, wallet: str) -> tuple[list[dict], dict[str, str]]:
-    """Token accounts the wallet owns, capped, with optional metadata for a few."""
+async def _load_holdings(sol, wallet: str) -> list[dict]:
+    """Token accounts the wallet owns, capped, with optional metadata for a few.
+
+    When RESOLVE_HOLDING_METADATA is on, each holding's on-chain name/symbol is
+    resolved via the Metaplex metadata program (one extra getAccountInfo per
+    holding, bounded by MAX_TOKEN_ACCOUNTS_PER_WALLET). Off by default because
+    it multiplies RPC cost on every wallet scan.
+    """
     try:
         accounts = await sol.get_token_accounts_by_owner(wallet, settings.USDC_MINT_ADDRESS or "")
     except Exception:  # noqa: BLE001
@@ -381,8 +397,8 @@ async def _load_holdings(sol, wallet: str) -> tuple[list[dict], dict[str, str]]:
     except Exception as exc:  # noqa: BLE001 — holdings are best-effort
         logger.warning("Holdings fetch failed for {}: {}", wallet, exc)
 
+    resolve = settings.RESOLVE_HOLDING_METADATA
     holdings: list[dict] = []
-    symbols: dict[str, str] = {}
     for acc in accounts[: settings.MAX_TOKEN_ACCOUNTS_PER_WALLET]:
         try:
             info = acc["account"]["data"]["parsed"]["info"]
@@ -392,8 +408,16 @@ async def _load_holdings(sol, wallet: str) -> tuple[list[dict], dict[str, str]]:
             continue
         if amount <= 0:
             continue
-        holdings.append({"mint": mint_addr, "ui_amount": amount, "symbol": None, "name": None})
-    return holdings, symbols
+        symbol = name = None
+        if resolve:
+            try:
+                meta = await token_metadata.fetch_metadata(sol, mint_addr)
+                if meta:
+                    symbol, name = meta.get("symbol"), meta.get("name")
+            except Exception as exc:  # noqa: BLE001 — one mint's metadata is not fatal
+                logger.warning("Holding metadata failed for {}: {}", mint_addr, exc)
+        holdings.append({"mint": mint_addr, "ui_amount": amount, "symbol": symbol, "name": name})
+    return holdings
 
 
 async def _load_activity(sol, wallet: str) -> list[dict]:

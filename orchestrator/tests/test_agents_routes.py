@@ -192,3 +192,136 @@ def test_webhook_test_requires_webhook_url(ctx, monkeypatch):
     monitor_id = resp.json()["id"]
     test_resp = client.post(f"/v1/agents/monitors/{monitor_id}/test", headers=_auth_header(user))
     assert test_resp.status_code == 400
+
+
+def test_patch_monitor_updates_fields(ctx):
+    client, db = ctx
+    user = db.add_user()
+    resp = client.post(
+        "/v1/agents/monitors",
+        headers=_auth_header(user),
+        json={
+            "name": "original",
+            "target_type": "token",
+            "target_address": str(Pubkey.new_unique()),
+            "conditions": [{"type": "accumulation_score", "gte": 70}],
+            "interval_minutes": 30,
+        },
+    )
+    monitor_id = resp.json()["id"]
+
+    patched = client.patch(
+        f"/v1/agents/monitors/{monitor_id}",
+        headers=_auth_header(user),
+        json={"name": "renamed", "interval_minutes": 60, "is_active": False},
+    )
+    assert patched.status_code == 200
+    body = patched.json()
+    assert body["name"] == "renamed"
+    assert body["interval_minutes"] == 60
+    assert body["is_active"] is False
+    # Unchanged fields stay.
+    assert body["conditions"][0]["type"] == "accumulation_score"
+
+
+def test_patch_monitor_validates_new_conditions(ctx):
+    client, db = ctx
+    user = db.add_user()
+    resp = client.post(
+        "/v1/agents/monitors",
+        headers=_auth_header(user),
+        json={
+            "target_type": "token",
+            "target_address": str(Pubkey.new_unique()),
+            "conditions": [{"type": "accumulation_score", "gte": 70}],
+        },
+    )
+    monitor_id = resp.json()["id"]
+
+    # Wallet-only condition on a token monitor -> 400.
+    bad = client.patch(
+        f"/v1/agents/monitors/{monitor_id}",
+        headers=_auth_header(user),
+        json={"conditions": [{"type": "new_activity"}]},
+    )
+    assert bad.status_code == 400
+
+
+def test_patch_monitor_owner_scoped(ctx):
+    client, db = ctx
+    user_a = db.add_user()
+    user_b = db.add_user()
+    resp = client.post(
+        "/v1/agents/monitors",
+        headers=_auth_header(user_a),
+        json={
+            "target_type": "token",
+            "target_address": str(Pubkey.new_unique()),
+            "conditions": [{"type": "accumulation_score", "gte": 70}],
+        },
+    )
+    monitor_id = resp.json()["id"]
+
+    assert (
+        client.patch(
+            f"/v1/agents/monitors/{monitor_id}",
+            headers=_auth_header(user_b),
+            json={"name": "hijack"},
+        ).status_code
+        == 404
+    )
+
+
+def test_patch_monitor_reset_baseline(ctx, monkeypatch):
+    client, db = ctx
+    user = db.add_user()
+
+    async def _price(mint):
+        return 42.0
+
+    monkeypatch.setattr(token_intel, "get_token_price_usdc", _price)
+    resp = client.post(
+        "/v1/agents/monitors",
+        headers=_auth_header(user),
+        json={
+            "target_type": "token",
+            "target_address": str(Pubkey.new_unique()),
+            "conditions": [{"type": "price_drop_pct", "gte": 10}],
+        },
+    )
+    monitor_id = resp.json()["id"]
+
+    patched = client.patch(
+        f"/v1/agents/monitors/{monitor_id}",
+        headers=_auth_header(user),
+        json={"reset_baseline": True},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["baseline_price_usdc"] == 42.0
+
+
+def test_patch_monitor_reset_baseline_rejected_without_price_condition(ctx, monkeypatch):
+    client, db = ctx
+    user = db.add_user()
+
+    async def _no_price(mint):
+        return None
+
+    monkeypatch.setattr(token_intel, "get_token_price_usdc", _no_price)
+    resp = client.post(
+        "/v1/agents/monitors",
+        headers=_auth_header(user),
+        json={
+            "target_type": "token",
+            "target_address": str(Pubkey.new_unique()),
+            "conditions": [{"type": "accumulation_score", "gte": 70}],
+        },
+    )
+    monitor_id = resp.json()["id"]
+
+    bad = client.patch(
+        f"/v1/agents/monitors/{monitor_id}",
+        headers=_auth_header(user),
+        json={"reset_baseline": True},
+    )
+    assert bad.status_code == 400

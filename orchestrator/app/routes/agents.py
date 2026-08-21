@@ -19,6 +19,7 @@ from app.models.intel import (
     AlertEventResponse,
     MonitorCreateRequest,
     MonitorResponse,
+    MonitorUpdateRequest,
     WebhookTestResponse,
 )
 from app.services import token_intel
@@ -157,6 +158,60 @@ async def delete_monitor(
     _get_owned_monitor(db, monitor_id, current_user["id"])
     db.table("monitors").delete().eq("id", monitor_id).eq("user_id", current_user["id"]).execute()
     return None
+
+
+@router.patch("/monitors/{monitor_id}", response_model=MonitorResponse)
+async def update_monitor(
+    monitor_id: str,
+    body: MonitorUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Update a monitor's name/conditions/webhook/interval/active state (owner only).
+
+    Only the fields provided in the body are changed. Re-snapshotting the price
+    baseline (reset_baseline=true) refreshes the reference price of a
+    price_drop_pct monitor to the current market price.
+    """
+    monitor = _get_owned_monitor(db, monitor_id, current_user["id"])
+
+    updates: dict = {}
+    if body.name is not None:
+        updates["name"] = body.name
+    if body.conditions is not None:
+        conditions = [c.model_dump() for c in body.conditions]
+        _validate_conditions(monitor["target_type"], conditions)
+        updates["conditions"] = conditions
+    if body.webhook_url is not None:
+        updates["webhook_url"] = body.webhook_url
+    if body.is_active is not None:
+        updates["is_active"] = body.is_active
+    if body.interval_minutes is not None:
+        updates["interval_minutes"] = body.interval_minutes
+
+    if body.reset_baseline:
+        if monitor["target_type"] != "token" or not any(
+            c.get("type") == "price_drop_pct" for c in (monitor.get("conditions") or [])
+        ):
+            raise ValidationError("reset_baseline requires a token monitor with a price_drop_pct condition")
+        price = await token_intel.get_token_price_usdc(monitor["target_address"])
+        if price is None:
+            raise ValidationError("Cannot re-snapshot the baseline — no current price available")
+        updates["baseline_price_usdc"] = float(price)
+
+    if not updates:
+        return _monitor_response(monitor)
+
+    updated = (
+        db.table("monitors")
+        .update(updates)
+        .eq("id", monitor_id)
+        .eq("user_id", current_user["id"])
+        .execute()
+    )
+    if not updated.data:
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    return _monitor_response(updated.data[0])
 
 
 @router.get("/monitors/{monitor_id}/alerts", response_model=list[AlertEventResponse])

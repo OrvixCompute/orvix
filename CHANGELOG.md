@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   balances, so accumulation scoring has a real distribution component. The
   monitor worker refreshes snapshots automatically for monitored tokens
   (`INTEL_HOLDER_SNAPSHOT_TTL_SECONDS`).
+- **Monitor updates** (`PATCH /v1/agents/monitors/{id}`): edit name, conditions,
+  webhook URL, interval, or active state; `reset_baseline` re-snapshots the
+  baseline price of a `price_drop_pct` monitor to the current market price.
+- **Webhook signing** (`WEBHOOK_SIGNING_SECRET`): deliveries now include an
+  `X-Orvix-Signature` HMAC-SHA256 header (of the raw JSON body) so receivers
+  can authenticate the sender.
+- **Optional holding metadata** (`RESOLVE_HOLDING_METADATA`): wallet analysis
+  resolves each holding's on-chain name/symbol via the Metaplex metadata
+  program (one extra RPC per holding; off by default).
 
 ### Node package (PyPI)
 

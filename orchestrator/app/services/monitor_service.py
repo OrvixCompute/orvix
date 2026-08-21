@@ -27,6 +27,9 @@ cycle.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -41,6 +44,25 @@ from app.services import token_intel
 from app.services.solana_service import get_solana_service
 
 TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+
+def _sign_payload(payload: dict, secret: str) -> str:
+    """Hex HMAC-SHA256 of the canonical JSON body, signed with `secret`.
+
+    The body is the exact bytes httpx will send (compact separators, sorted
+    keys), so a receiver can verify the signature against the raw body it
+    received.
+    """
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+
+def _signing_headers(payload: dict) -> dict[str, str]:
+    """X-Orvix-Signature header when WEBHOOK_SIGNING_SECRET is configured."""
+    secret = settings.WEBHOOK_SIGNING_SECRET
+    if not secret:
+        return {}
+    return {"X-Orvix-Signature": _sign_payload(payload, secret)}
 
 
 def _now_iso() -> str:
@@ -461,11 +483,15 @@ class MonitorService:
         attempts = int(row.get("attempts") or 0)
         url = row.get("webhook_url")
         payload = row.get("payload") or {}
+        headers = _signing_headers(payload)
         ok = False
         error = ""
         try:
             async with httpx.AsyncClient(timeout=settings.WEBHOOK_TIMEOUT_SECONDS) as client:
-                resp = await client.post(url, json=payload, timeout=settings.WEBHOOK_TIMEOUT_SECONDS)
+                resp = await client.post(
+                    url, json=payload, headers=headers,
+                    timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
+                )
             ok = 200 <= resp.status_code < 300
         except Exception as exc:  # noqa: BLE001
             error = str(exc)

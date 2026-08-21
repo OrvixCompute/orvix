@@ -152,6 +152,20 @@ class MonitorCreateRequest(BaseModel):
     interval_minutes: int = Field(30, ge=5, le=1440)
 
 
+class MonitorUpdateRequest(BaseModel):
+    """All fields optional — only the provided ones are updated."""
+
+    name: Optional[str] = Field(None, max_length=120)
+    conditions: Optional[list[MonitorCondition]] = Field(None, min_length=1)
+    webhook_url: Optional[str] = Field(None, max_length=2048)
+    is_active: Optional[bool] = None
+    interval_minutes: Optional[int] = Field(None, ge=5, le=1440)
+    reset_baseline: Optional[bool] = Field(
+        None,
+        description="When true and the monitor is a token with a price condition, re-snapshot the baseline price",
+    )
+
+
 class MonitorResponse(BaseModel):
     id: str
     name: str

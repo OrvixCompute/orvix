@@ -89,7 +89,7 @@ async def test_success_marks_delivered(monkeypatch):
     class FakeResp:
         status_code = 200
 
-    async def fake_post(url, json, timeout):
+    async def fake_post(url, json, timeout, headers=None):
         return FakeResp()
 
     monkeypatch.setattr(monitor_service.httpx, "AsyncClient", _client(fake_post))
@@ -107,7 +107,7 @@ async def test_failure_backs_off(monkeypatch):
     class FakeResp:
         status_code = 500
 
-    async def fake_post(url, json, timeout):
+    async def fake_post(url, json, timeout, headers=None):
         return FakeResp()
 
     monkeypatch.setattr(monitor_service.httpx, "AsyncClient", _client(fake_post))
@@ -127,7 +127,7 @@ async def test_failure_caps_at_max_attempts(monkeypatch):
     class FakeResp:
         status_code = 503
 
-    async def fake_post(url, json, timeout):
+    async def fake_post(url, json, timeout, headers=None):
         return FakeResp()
 
     monkeypatch.setattr(monitor_service.httpx, "AsyncClient", _client(fake_post))
@@ -143,7 +143,7 @@ async def test_network_error_is_retryable(monkeypatch):
     db = FakeWebhookDb()
     db.rows.append(_webhook_row())
 
-    async def fake_post(url, json, timeout):
+    async def fake_post(url, json, timeout, headers=None):
         raise RuntimeError("connection refused")
 
     monkeypatch.setattr(monitor_service.httpx, "AsyncClient", _client(fake_post))
@@ -152,6 +152,70 @@ async def test_network_error_is_retryable(monkeypatch):
     row = db.rows[0]
     assert row["status"] == "pending"
     assert row["last_error"] == "connection refused"
+
+
+def test_sign_payload_is_deterministic_and_keyed():
+    payload = {"a": 1, "b": {"c": "x"}}
+    sig1 = monitor_service._sign_payload(payload, "secret1")
+    sig2 = monitor_service._sign_payload(payload, "secret1")
+    sig3 = monitor_service._sign_payload(payload, "secret2")
+    assert sig1 == sig2
+    assert sig1 != sig3
+    assert len(sig1) == 64  # hex sha256
+
+
+def test_sign_payload_matches_manual_hmac():
+    import hashlib
+    import hmac
+    import json
+
+    payload = {"event_id": "e-1", "message": "hi"}
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    expected = hmac.new(b"topsecret", body, hashlib.sha256).hexdigest()
+    assert monitor_service._sign_payload(payload, "topsecret") == expected
+
+
+@pytest.mark.asyncio
+async def test_signing_headers_sent_when_secret_configured(monkeypatch):
+    """The delivery includes X-Orvix-Signature when WEBHOOK_SIGNING_SECRET is set."""
+    db = FakeWebhookDb()
+    db.rows.append(_webhook_row())
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+
+    async def fake_post(url, json, timeout, headers=None):
+        captured["headers"] = headers or {}
+        return FakeResp()
+
+    monkeypatch.setattr(monitor_service.httpx, "AsyncClient", _client(fake_post))
+    monkeypatch.setattr(monitor_service.settings, "WEBHOOK_SIGNING_SECRET", "sekret")
+
+    await svc._deliver_webhook(db, db.rows[0])
+    sig = captured["headers"].get("X-Orvix-Signature")
+    assert sig is not None
+    assert len(sig) == 64
+
+
+@pytest.mark.asyncio
+async def test_no_signing_headers_without_secret(monkeypatch):
+    db = FakeWebhookDb()
+    db.rows.append(_webhook_row())
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+
+    async def fake_post(url, json, timeout, headers=None):
+        captured["headers"] = headers or {}
+        return FakeResp()
+
+    monkeypatch.setattr(monitor_service.httpx, "AsyncClient", _client(fake_post))
+    monkeypatch.setattr(monitor_service.settings, "WEBHOOK_SIGNING_SECRET", "")
+
+    await svc._deliver_webhook(db, db.rows[0])
+    assert "X-Orvix-Signature" not in captured["headers"]
 
 
 def _client(post_fn):
@@ -165,7 +229,7 @@ def _client(post_fn):
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, json, timeout):
-            return await post_fn(url, json, timeout)
+        async def post(self, url, json, timeout, headers=None):
+            return await post_fn(url, json, timeout, headers=headers)
 
     return FakeClient
