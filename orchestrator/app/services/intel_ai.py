@@ -45,25 +45,29 @@ def _build_prompt(mint: str, scan: dict, accumulation: Optional[dict], social: O
     liquidity = scan.get("liquidity") or {}
     risk = scan.get("risk") or {}
     acc = (accumulation or {}).get("metrics") or {}
+    holders = scan.get("holders") or {}
+    holder_count = holders.get("total_holders") or 0
+    top10_share = holders.get("top10_share")
 
     prompt = (
-        "You are ORVIX, a crypto market intelligence agent. Analyze this Solana "
-        "token using ONLY the on-chain data below. Return a concise JSON object "
-        "with keys: narrative (2-4 sentences describing the current market "
-        "picture and emerging narrative), risk_flags (array of short strings), "
-        "watch_next (1-2 sentences on what to watch). Do not invent data.\n\n"
-        f"Token: {metadata.get('name') or mint} ({metadata.get('symbol') or 'unknown symbol'})\n"
-        f"URI: {metadata.get('uri') or 'none'}\n"
-        f"Supply: {supply.get('uiAmountString') or 'unknown'} (decimals {supply.get('decimals')})\n"
-        f"Price USDC: {scan.get('price_usdc') or 'unknown'}\n"
-        f"Liquidity (pools): {liquidity.get('pool_count')} pools, "
-        f"~{liquidity.get('estimated_usdc') or 'unknown'} USDC\n"
-        f"Top-10 holder share: {((scan.get('holders') or {}).get('top10_share')) if scan.get('holders') else 'unknown'}\n"
-        f"Accumulation score: {accumulation.get('score') if accumulation else 'unknown'} "
-        f"({accumulation.get('label') if accumulation else ''})\n"
-        f"  - net inflow 7d: {acc.get('inflow_7d')}\n"
-        f"  - buy txs 7d: {acc.get('buy_tx_7d')}\n"
-        f"Risk warnings: {risk.get('warnings') or 'none'}\n"
+        "You are ORVIX, a crypto intelligence agent. Analyze this Solana token.\n"
+        "Return ONLY a JSON object with these exact keys:\n"
+        '{"narrative": "...", "risk_flags": ["..."], "watch_next": "...", '
+        '"verdict": "buy|hold|avoid|scam_risk", "reasons": ["...", "...", "..."]}\n\n'
+        "- narrative: 2-4 sentences market picture\n"
+        "- risk_flags: array of short risk strings\n"
+        "- watch_next: what to watch next\n"
+        "- verdict: buy, hold, avoid, or scam_risk\n"
+        "- reasons: 3-5 bullet points WHY this verdict (mention concentration, liquidity, social, accumulation)\n\n"
+        f"Token: {metadata.get('name') or mint} ({metadata.get('symbol') or '?'})\n"
+        f"Supply: {supply.get('uiAmountString') or '?'}\n"
+        f"Price: {scan.get('price_usdc') or '?'} USDC\n"
+        f"Pools: {liquidity.get('pool_count')}, Liquidity: {liquidity.get('estimated_usdc') or '?'} USDC\n"
+        f"Holders: {holder_count}\n"
+        f"Top-10 share: {top10_share if top10_share is not None else '?'}\n"
+        f"Accumulation: {accumulation.get('score') if accumulation else '?'} ({accumulation.get('label') if accumulation else ''})\n"
+        f"Inflow 7d: {acc.get('inflow_7d')}, Buy txs 7d: {acc.get('buy_tx_7d')}\n"
+        f"Warnings: {risk.get('warnings') or 'none'}\n"
     )
 
     if social:
@@ -122,6 +126,12 @@ async def generate_token_intelligence(
         logger.warning("Intelligence: social analysis failed for {}: {}", mint, exc)
         social = None
 
+    # Extract holder stats for the fallback path.
+    holders_data = scan.get("holders") or {}
+    holder_count = holders_data.get("total_holders") or 0
+    top10_share = holders_data.get("top10_share")
+    liquidity = scan.get("liquidity") or {}
+
     model = settings.INTEL_AI_MODEL
     # Bronze tier selection is fine for internal jobs; priority tiers only change
     # *which* least-loaded node is picked, not whether one is available.
@@ -167,7 +177,20 @@ async def generate_token_intelligence(
     parsed = _parse_json(content)
     if parsed is None:
         # Fall back to the raw text — still useful, still intelligence.
-        parsed = {"narrative": content.strip(), "risk_flags": [], "watch_next": ""}
+        parsed = {
+            "narrative": content.strip(),
+            "risk_flags": [],
+            "watch_next": "",
+            "verdict": None,
+            "reasons": [],
+        }
+
+    # Always inject computed fields from backend data — model doesn't need to guess these.
+    parsed["holder_count"] = holder_count
+    parsed["top10_share"] = top10_share
+    parsed["risk_score"] = _compute_risk_score(
+        liquidity, top10_share, accumulation, social
+    )
 
     payload = {
         "mint": mint,
@@ -218,3 +241,53 @@ def _parse_json(content: str) -> Optional[dict]:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _compute_risk_score(
+    liquidity: dict,
+    top10_share: Optional[float],
+    accumulation: Optional[dict],
+    social: Optional[dict],
+) -> int:
+    """Compute a 0-100 risk score from available data. Pure, deterministic.
+
+    Higher = riskier. Factors:
+    - No liquidity: +30
+    - Top-10 concentration >80%: +25, >50%: +15
+    - Accumulation score <20: +15, <40: +10
+    - No social links: +10
+    - Social score <20: +10
+    """
+    risk = 0
+
+    # Liquidity
+    pools = liquidity.get("pool_count") or 0
+    if pools == 0:
+        risk += 30
+
+    # Holder concentration
+    if top10_share is not None:
+        if top10_share > 0.8:
+            risk += 25
+        elif top10_share > 0.5:
+            risk += 15
+
+    # Accumulation
+    if accumulation:
+        score = accumulation.get("score") or 0
+        if score < 20:
+            risk += 15
+        elif score < 40:
+            risk += 10
+
+    # Social
+    if social:
+        social_score = social.get("social_score") or 0
+        links = social.get("social_links") or {}
+        has_links = any(v for v in links.values())
+        if not has_links:
+            risk += 10
+        if social_score < 20:
+            risk += 10
+
+    return min(risk, 100)

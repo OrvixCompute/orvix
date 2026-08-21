@@ -62,6 +62,11 @@ class TokenIntelligenceAnalysis(BaseModel):
     narrative: str = Field(..., description="AI-written market picture / emerging narrative")
     risk_flags: list[str] = Field(default_factory=list)
     watch_next: str = Field("", description="What to watch next, per the model")
+    holder_count: Optional[int] = Field(None, description="Number of top holders analyzed")
+    top10_share: Optional[float] = Field(None, description="Top-10 holder concentration (0-1)")
+    risk_score: Optional[int] = Field(None, ge=0, le=100, description="0=safe, 100=extreme risk")
+    verdict: Optional[str] = Field(None, description="buy | hold | avoid | scam_risk")
+    reasons: list[str] = Field(default_factory=list, description="Why this verdict — concise bullet points")
 
 
 class TokenIntelligenceResponse(BaseModel):

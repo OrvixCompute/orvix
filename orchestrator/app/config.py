@@ -459,7 +459,7 @@ class Settings(BaseSettings):
         ),
     )
     INTEL_AI_MAX_TOKENS: int = Field(
-        300, description="Max completion tokens for a token-intelligence analysis"
+        500, description="Max completion tokens for a token-intelligence analysis"
     )
     INTEL_AI_TEMPERATURE: float = Field(
         0.3, description="Sampling temperature for token-intelligence analysis"
