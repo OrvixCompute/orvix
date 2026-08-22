@@ -38,6 +38,9 @@ logs/
 # Internal reference docs (not for publication)
 reference/
 
+# Local planning files
+PLAN_5DAY.md
+
 # Editors / OS
 .vscode/
 .idea/
