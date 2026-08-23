@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     # --- Core (optional) ---------------------------------------------------
     LOG_LEVEL: str = Field("INFO", description="Loguru log level")
     CORS_ORIGINS: str = Field("*", description="Comma-separated list of allowed CORS origins")
+    REDIS_URL: str = Field(
+        "",
+        description=(
+            "Redis connection URL (e.g. redis://localhost:6379/0). When set, "
+            "rate limiting and challenge storage use Redis instead of in-memory "
+            "dicts. Empty falls back to in-memory (single-worker only)."
+        ),
+    )
 
     # --- Observability (optional) ------------------------------------------
     SENTRY_DSN: str = Field(

@@ -1,8 +1,4 @@
-"""Wire protocol between node and orchestrator.
-
-Re-exports from the shared ``orvix_protocol`` package. The canonical source
-lives at ``packages/protocol/orvix_protocol/protocol.py``.
-"""
+"""Orvix shared wire protocol models."""
 
 from orvix_protocol.protocol import (
     AnyMessage,

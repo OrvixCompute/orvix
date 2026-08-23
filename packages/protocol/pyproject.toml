@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orvix-protocol"
+version = "0.1.0"
+description = "Shared wire protocol models for Orvix orchestrator and node."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Orvix" }]
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.urls]
+Homepage = "https://orvix.network"
+Repository = "https://github.com/OrvixCompute/orvix"
+
+[tool.setuptools.packages.find]
+include = ["orvix_protocol*"]
