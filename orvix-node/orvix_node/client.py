@@ -38,7 +38,6 @@ EmbeddingHandler = Callable[[EmbeddingJobDispatchMessage], Awaitable[None]]
 VideoHandler = Callable[[VideoJobDispatchMessage], Awaitable[None]]
 
 ACK_TIMEOUT = 10.0
-MAX_BACKOFF = 60.0
 
 
 class OrchestratorClient:
@@ -152,7 +151,7 @@ class OrchestratorClient:
                 await asyncio.wait_for(self._stop.wait(), timeout=backoff)
             except asyncio.TimeoutError:
                 pass
-            backoff = min(backoff * 2, MAX_BACKOFF)
+            backoff = min(backoff * 2, self.config.max_reconnect_delay)
 
     async def verify(self) -> str:
         """Connect, register, disconnect. Returns the node id the orchestrator gave.

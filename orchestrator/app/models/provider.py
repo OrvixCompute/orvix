@@ -41,3 +41,36 @@ class SecretResponse(BaseModel):
     # A provider following the docs got one of the two credentials and stalled.
     provider_id: str
     node_secret: str
+
+
+class OnboardResponse(BaseModel):
+    provider_id: str
+    node_secret: str
+    join_command: str
+
+
+class NodeHealthAlert(BaseModel):
+    severity: str  # "warning" | "critical"
+    code: str  # "stale_heartbeat" | "high_vram" | "consecutive_failures"
+    message: str
+
+
+class NodeHealthEntry(BaseModel):
+    node_id: str
+    name: Optional[str] = None
+    status: str
+    is_connected: bool
+    uptime_seconds: Optional[float] = None
+    last_heartbeat: Optional[str] = None
+    active_jobs: int = 0
+    engines: list[str] = []
+    vram_used_mb: int = 0
+    vram_total_mb: int = 0
+    vram_usage_pct: float = 0.0
+    alerts: list[NodeHealthAlert] = []
+
+
+class ProviderHealthResponse(BaseModel):
+    total_nodes: int
+    online_nodes: int
+    nodes: list[NodeHealthEntry]

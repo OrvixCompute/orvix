@@ -300,3 +300,35 @@ def test_join_accepts_every_model_the_router_knows(tmp_path, monkeypatch):
         )
         assert result.exit_code == 0, f"{model}: {result.output}"
         assert f'model: "{model}"' in cfg_path.read_text()
+
+
+# --- max_reconnect_delay ---------------------------------------------------
+def test_max_reconnect_delay_default():
+    cfg = NodeConfig(provider_id="p", node_secret="s")
+    assert cfg.max_reconnect_delay == 60.0
+
+
+def test_max_reconnect_delay_from_file(tmp_path):
+    path = _write_config(
+        tmp_path,
+        """
+        provider_id: prov-1
+        node_secret: secret-1
+        max_reconnect_delay: 30.0
+        """,
+    )
+    cfg = load_config(config_file=path)
+    assert cfg.max_reconnect_delay == 30.0
+
+
+def test_max_reconnect_delay_from_env(tmp_path, monkeypatch):
+    path = _write_config(
+        tmp_path,
+        """
+        provider_id: prov-1
+        node_secret: secret-1
+        """,
+    )
+    monkeypatch.setenv("ORVIX_NODE_MAX_RECONNECT_DELAY", "45")
+    cfg = load_config(config_file=path)
+    assert cfg.max_reconnect_delay == 45.0

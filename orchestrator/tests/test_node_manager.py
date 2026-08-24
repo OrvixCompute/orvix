@@ -341,3 +341,114 @@ async def test_acquire_returns_immediately_when_a_slot_is_free():
     manager.connected_nodes[node.node_id] = node
 
     assert await manager.acquire_node("qwen-2.5-7b", "bronze", wait_s=5.0) is node
+
+
+# --- 3.4: capability validation -------------------------------------------
+async def test_register_defaults_empty_engines_to_chat(monkeypatch):
+    """A node that sends an empty engines list (the protocol default) gets ["chat"].
+
+    The protocol's default for engines is [] (older nodes), so the manager
+    treats it as "not provided" and defaults to chat capability.
+    """
+    db = FakeSupabase()
+    user = db.add_user()
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+    msg = RegisterMessage(
+        provider_id=user["id"],
+        node_secret="secret",
+        version="0.1.0",
+        gpu_info=GPUInfo(model="RTX 4090", vram_total_mb=24576),
+        models_supported=["qwen-2.5-7b"],
+        max_concurrent_jobs=2,
+        engines=[],
+    )
+    conn = await mgr.register_node(FakeWS(), msg)
+    assert conn.engines == ["chat"]
+
+
+# --- 3.4: VRAM-aware selection --------------------------------------------
+def _conn_with_vram(node_id, free_vram_mb, current_jobs=0, max_jobs=4, model="qwen-2.5-7b"):
+    total = 24576
+    used = total - free_vram_mb
+    c = NodeConnection(
+        node_id=node_id,
+        provider_id="prov",
+        websocket=FakeWS(),
+        model=model,
+        gpu_info={"model": "RTX 4090", "vram_total_mb": total},
+        max_concurrent_jobs=max_jobs,
+        current_jobs=current_jobs,
+        status="ready",
+        models_supported=[model],
+        vram_gb=24.0,
+        gpu_metrics={"memory_used_mb": used, "memory_total_mb": total},
+    )
+    return c
+
+
+def test_select_prefers_more_free_vram():
+    """When two nodes have the same load, prefer the one with more free VRAM."""
+    mgr = NodeManager()
+    low_vram = _conn_with_vram("low", free_vram_mb=2000)
+    high_vram = _conn_with_vram("high", free_vram_mb=20000)
+    mgr.connected_nodes = {"low": low_vram, "high": high_vram}
+    assert mgr.select_node("qwen-2.5-7b", "bronze").node_id == "high"
+
+
+def test_select_still_prefers_least_loaded():
+    """Load (current_jobs) is still the primary sort key."""
+    mgr = NodeManager()
+    busy = _conn_with_vram("busy", free_vram_mb=20000, current_jobs=3)
+    idle = _conn_with_vram("idle", free_vram_mb=2000, current_jobs=0)
+    mgr.connected_nodes = {"busy": busy, "idle": idle}
+    assert mgr.select_node("qwen-2.5-7b", "bronze").node_id == "idle"
+
+
+# --- 3.4: drain mode ------------------------------------------------------
+async def test_drain_node_sets_status(monkeypatch):
+    db = FakeSupabase()
+    user = db.add_user()
+    db._table("nodes").insert_row(
+        {"id": "n1", "provider_id": user["id"], "status": "ready"}
+    )
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    mgr = NodeManager()
+    conn = _conn("n1", provider=user["id"])
+    mgr.connected_nodes["n1"] = conn
+
+    result = await mgr.drain_node("n1")
+    assert result is True
+    assert conn.status == "draining"
+    assert db._table("nodes").rows[0]["status"] == "draining"
+
+
+async def test_drain_disconnected_node_returns_false():
+    mgr = NodeManager()
+    result = await mgr.drain_node("nonexistent")
+    assert result is False
+
+
+# --- 3.4: GPU metrics stored on heartbeat ---------------------------------
+def test_update_heartbeat_stores_gpu_metrics():
+    mgr = NodeManager()
+    conn = _conn("n1")
+    mgr.connected_nodes["n1"] = conn
+
+    metrics = {"memory_used_mb": 8000, "memory_total_mb": 24576, "gpu_util_pct": 45}
+    mgr.update_heartbeat("n1", "ready", 1, gpu_metrics=metrics)
+
+    assert conn.gpu_metrics == metrics
+    assert conn.current_jobs == 1
+
+
+def test_update_heartbeat_without_metrics():
+    mgr = NodeManager()
+    conn = _conn("n1")
+    conn.gpu_metrics = {"memory_used_mb": 5000, "memory_total_mb": 24576}
+    mgr.connected_nodes["n1"] = conn
+
+    mgr.update_heartbeat("n1", "busy", 3)
+    assert conn.current_jobs == 3
+    # gpu_metrics should remain unchanged when not provided.
+    assert conn.gpu_metrics["memory_used_mb"] == 5000

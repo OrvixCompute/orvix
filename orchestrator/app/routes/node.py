@@ -80,7 +80,10 @@ async def node_connect(websocket: WebSocket) -> None:
 
             if isinstance(incoming, HeartbeatMessage):
                 node_manager.update_heartbeat(
-                    node_id, incoming.status, incoming.current_jobs
+                    node_id,
+                    incoming.status,
+                    incoming.current_jobs,
+                    incoming.gpu_metrics.model_dump() if incoming.gpu_metrics else None,
                 )
             elif isinstance(incoming, JobResultMessage):
                 node_manager.handle_job_result(node_id, incoming)

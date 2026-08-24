@@ -105,6 +105,9 @@ class NodeConfig(BaseModel):
     # orchestrator fetches images from here). Falls back to the local health
     # server when empty (dev only — not reachable from a remote orchestrator).
     binary_public_url: str = ""
+    # Maximum backoff between reconnection attempts (seconds). The client uses
+    # exponential backoff starting at 1s, doubling each attempt up to this cap.
+    max_reconnect_delay: float = 60.0
 
     def masked(self) -> dict:
         """Config as a dict with secrets masked, for display."""

@@ -88,12 +88,29 @@ class NodeConnection:
     # None means attestation is disabled or could not be obtained (fail-soft).
     attestation: Optional[dict] = None
     pending_jobs: dict[str, PendingJob] = field(default_factory=dict)
+    # Latest GPU metrics from the most recent heartbeat. Used for VRAM-aware
+    # node selection so the orchestrator prefers nodes with more free memory.
+    gpu_metrics: Optional[dict] = None
     _send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def send(self, msg) -> None:
         """Serialize and send a message, guarding against interleaved writes."""
         async with self._send_lock:
             await self.websocket.send_text(serialize(msg))
+
+    @property
+    def free_vram_mb(self) -> int:
+        """Free VRAM in MB from the latest heartbeat metrics.
+
+        Returns the total VRAM (from registration) when no live metrics are
+        available yet, treating an unmeasured node as fully free so it is not
+        unfairly penalised during the first heartbeat cycle.
+        """
+        if self.gpu_metrics and self.gpu_metrics.get("memory_total_mb"):
+            return int(self.gpu_metrics["memory_total_mb"]) - int(
+                self.gpu_metrics.get("memory_used_mb", 0)
+            )
+        return int(self.vram_gb * 1024) if self.vram_gb else 0
 
 
 class NodeManager:
@@ -284,13 +301,17 @@ class NodeManager:
         logger.info("Node unregistered: {}", node_id)
 
     # --- heartbeat / state -------------------------------------------------
-    def update_heartbeat(self, node_id: str, status: str, current_jobs: int) -> None:
+    def update_heartbeat(
+        self, node_id: str, status: str, current_jobs: int, gpu_metrics: dict | None = None
+    ) -> None:
         conn = self.connected_nodes.get(node_id)
         if conn is None:
             return
         conn.status = status
         conn.current_jobs = current_jobs
         conn.last_heartbeat = datetime.now(timezone.utc)
+        if gpu_metrics is not None:
+            conn.gpu_metrics = gpu_metrics
 
     # --- selection ---------------------------------------------------------
     def select_node(self, model: str, user_tier: str) -> NodeConnection | None:
@@ -303,9 +324,9 @@ class NodeManager:
         ]
         if not candidates:
             return None
-        # Priority tiers get the least-loaded node; others get any available.
-        if user_tier in PRIORITY_TIERS:
-            candidates.sort(key=lambda c: c.current_jobs)
+        # Priority tiers get the least-loaded node with the most free VRAM;
+        # others get any available, still preferring more free VRAM.
+        candidates.sort(key=lambda c: (c.current_jobs, -c.free_vram_mb))
         return candidates[0]
 
     async def acquire_node(
@@ -376,7 +397,7 @@ class NodeManager:
             and model in c.models_supported
             and c.current_jobs < c.max_concurrent_jobs
         ]
-        candidates.sort(key=lambda c: c.current_jobs)
+        candidates.sort(key=lambda c: (c.current_jobs, -c.free_vram_mb))
         return candidates[0] if candidates else None
 
     def select_embedding_node(self, model: str) -> NodeConnection | None:
@@ -389,7 +410,7 @@ class NodeManager:
             and model in c.models_supported
             and c.current_jobs < c.max_concurrent_jobs
         ]
-        candidates.sort(key=lambda c: c.current_jobs)
+        candidates.sort(key=lambda c: (c.current_jobs, -c.free_vram_mb))
         return candidates[0] if candidates else None
 
     def select_video_node(self, model: str) -> NodeConnection | None:
@@ -402,7 +423,7 @@ class NodeManager:
             and model in c.models_supported
             and c.current_jobs < c.max_concurrent_jobs
         ]
-        candidates.sort(key=lambda c: c.current_jobs)
+        candidates.sort(key=lambda c: (c.current_jobs, -c.free_vram_mb))
         return candidates[0] if candidates else None
 
     # --- dispatch ----------------------------------------------------------
@@ -641,6 +662,24 @@ class NodeManager:
             except Exception:  # noqa: BLE001
                 pass
         self.connected_nodes.clear()
+
+    async def drain_node(self, node_id: str) -> bool:
+        """Put a node into draining mode so it finishes current jobs but accepts no new ones.
+
+        Returns True if the node was found and set to draining.
+        """
+        conn = self.connected_nodes.get(node_id)
+        if conn is None:
+            return False
+        conn.status = "draining"
+        try:
+            get_supabase().table("nodes").update({"status": "draining"}).eq(
+                "id", node_id
+            ).execute()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to mark node {} draining in DB: {}", node_id, exc)
+        logger.info("Node {} set to draining ({} jobs in flight)", node_id, conn.current_jobs)
+        return True
 
 
 # Process-wide singleton.

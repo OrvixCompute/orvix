@@ -17,6 +17,10 @@ from app.exceptions import NotFoundError, ValidationError
 from app.logger import logger
 from app.models.protocol import ShutdownMessage
 from app.models.provider import (
+    NodeHealthAlert,
+    NodeHealthEntry,
+    OnboardResponse,
+    ProviderHealthResponse,
     ProviderRegisterRequest,
     RenameNodeRequest,
     SecretResponse,
@@ -90,6 +94,52 @@ async def register_provider(
         update["email"] = current_user.get("email")  # display_name kept client-side for now
     db.table("users").update(update).eq("id", current_user["id"]).execute()
     return SecretResponse(provider_id=str(current_user["id"]), node_secret=secret)
+
+
+@router.post("/onboard", response_model=OnboardResponse)
+async def onboard_provider(
+    body: ProviderRegisterRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Combined onboarding: register as provider + return the join command.
+
+    Single-step convenience over POST /register — the response includes the
+    exact `orvix-node join` command so the provider can copy-paste it without
+    constructing the flags themselves.
+    """
+    if current_user.get("is_provider") and current_user.get("provider_secret_hash"):
+        # Already a provider — rotate the secret so the onboard response is
+        # always fresh and actionable.
+        secret = secrets.token_urlsafe(24)
+        db.table("users").update({"provider_secret_hash": _hash_secret(secret)}).eq(
+            "id", current_user["id"]
+        ).execute()
+    else:
+        staked = Decimal(str(current_user.get("staked_orvx", 0)))
+        minimum = Decimal(settings.PROVIDER_MIN_STAKE_ORVX)
+        if settings.REQUIRE_STAKE_FOR_PROVIDER:
+            if staked < minimum:
+                raise ValidationError(
+                    f"Provider registration requires staking at least "
+                    f"{settings.PROVIDER_MIN_STAKE_ORVX} ORVX.",
+                    error_code="insufficient_stake",
+                    details={
+                        "current_stake": format(staked, "f"),
+                        "required": format(minimum, "f"),
+                    },
+                )
+        secret = secrets.token_urlsafe(24)
+        update = {"is_provider": True, "provider_secret_hash": _hash_secret(secret)}
+        db.table("users").update(update).eq("id", current_user["id"]).execute()
+
+    provider_id = str(current_user["id"])
+    join_command = f"orvix-node join --provider-id {provider_id} --secret {secret}"
+    return OnboardResponse(
+        provider_id=provider_id,
+        node_secret=secret,
+        join_command=join_command,
+    )
 
 
 @router.post("/regenerate-secret", response_model=SecretResponse)
@@ -208,6 +258,34 @@ async def rename_node(
     return {"id": node_id, "name": body.name}
 
 
+@router.get("/nodes/{node_id}/history")
+async def node_job_history(
+    node_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Recent job history for a specific node.
+
+    Returns jobs ordered by creation time (newest first) with basic outcome
+    info so the provider can spot patterns like repeated failures.
+    """
+    _owned_node(db, current_user["id"], node_id)
+    res = (
+        db.table("jobs")
+        .select(
+            "id, model, prompt_tokens, completion_tokens, cost_usdc, "
+            "provider_earning_usdc, status, error_message, latency_ms, created_at"
+        )
+        .eq("node_id", node_id)
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    return res.data or []
+
+
 @router.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_node(
     node_id: str,
@@ -226,6 +304,125 @@ async def delete_node(
             pass
         await node_manager.unregister_node(node_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/nodes/{node_id}/drain")
+async def drain_node(
+    node_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Put a node into draining mode for graceful maintenance.
+
+    The node finishes its in-flight jobs but accepts no new ones. Once all jobs
+    complete, the provider can safely take the node offline or perform updates.
+    """
+    _owned_node(db, current_user["id"], node_id)
+    drained = await node_manager.drain_node(node_id)
+    if not drained:
+        raise NotFoundError("Node is not currently connected")
+    return {"node_id": node_id, "status": "draining"}
+
+
+# ---------------------------------------------------------------------------
+# Health dashboard
+# ---------------------------------------------------------------------------
+@router.get("/health", response_model=ProviderHealthResponse)
+async def provider_health(
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+):
+    """Aggregated health of all nodes owned by the provider.
+
+    Each node entry includes live metrics (if connected), VRAM usage, and
+    alerts for stale heartbeats, high VRAM, or other issues.
+    """
+    res = (
+        db.table("nodes")
+        .select("*")
+        .eq("provider_id", current_user["id"])
+        .order("created_at", desc=True)
+        .execute()
+    )
+    now = datetime.now(timezone.utc)
+    entries: list[NodeHealthEntry] = []
+    online = 0
+
+    for n in res.data or []:
+        node_id = n["id"]
+        conn = node_manager.connected_nodes.get(node_id)
+        is_connected = conn is not None
+        if is_connected:
+            online += 1
+
+        alerts: list[NodeHealthAlert] = []
+
+        # Live metrics from the in-memory connection.
+        active_jobs = 0
+        vram_used_mb = 0
+        vram_total_mb = int(n.get("vram_mb") or 0)
+        uptime_seconds: float | None = None
+
+        if conn is not None:
+            active_jobs = conn.current_jobs
+            gpu = conn.gpu_info or {}
+            vram_used_mb = int(gpu.get("memory_used_mb", 0))
+            vram_total_mb = int(gpu.get("vram_total_mb", vram_total_mb))
+            # Uptime is time since the connection was established (approximate
+            # via last_heartbeat which is refreshed every heartbeat cycle).
+            uptime_seconds = (now - conn.last_heartbeat).total_seconds()
+
+        vram_pct = (vram_used_mb / vram_total_mb * 100) if vram_total_mb > 0 else 0.0
+
+        # Stale heartbeat alert.
+        hb = n.get("last_heartbeat")
+        if hb:
+            try:
+                hb_dt = datetime.fromisoformat(str(hb).replace("Z", "+00:00"))
+                stale_s = (now - hb_dt).total_seconds()
+                if stale_s > 60:
+                    alerts.append(
+                        NodeHealthAlert(
+                            severity="critical" if stale_s > 120 else "warning",
+                            code="stale_heartbeat",
+                            message=f"Heartbeat {int(stale_s)}s ago (threshold: 60s)",
+                        )
+                    )
+            except (ValueError, TypeError):
+                pass
+
+        # High VRAM alert.
+        if vram_pct > 90:
+            alerts.append(
+                NodeHealthAlert(
+                    severity="warning",
+                    code="high_vram",
+                    message=f"VRAM usage at {vram_pct:.0f}% (threshold: 90%)",
+                )
+            )
+
+        entries.append(
+            NodeHealthEntry(
+                node_id=node_id,
+                name=n.get("name"),
+                status=n["status"],
+                is_connected=is_connected,
+                uptime_seconds=uptime_seconds,
+                last_heartbeat=str(hb) if hb else None,
+                active_jobs=active_jobs,
+                engines=list(n.get("engines") or []),
+                vram_used_mb=vram_used_mb,
+                vram_total_mb=vram_total_mb,
+                vram_usage_pct=round(vram_pct, 1),
+                alerts=alerts,
+            )
+        )
+
+    return ProviderHealthResponse(
+        total_nodes=len(entries),
+        online_nodes=online,
+        nodes=entries,
+    )
 
 
 # ---------------------------------------------------------------------------
