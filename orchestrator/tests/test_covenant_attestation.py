@@ -138,6 +138,61 @@ async def test_attestation_failure_never_blocks_registration(monkeypatch):
     assert conn.node_id in mgr.connected_nodes
 
 
+async def test_attestation_uses_provider_wallet(monkeypatch):
+    db = FakeSupabase()
+    user = db.add_user(wallet_address="ProviderWa11et1111111111111111111111111111111")
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    _enable(monkeypatch)
+
+    captured = {}
+
+    async def check(self, wallet):
+        captured["wallet"] = wallet
+        return CovenantCheckResult(ok=False, tool="covenant_reputation", error="boom")
+
+    monkeypatch.setattr(nm, "get_covenant_service", lambda: type("S", (), {"check_reputation": check})())
+    mgr = nm.NodeManager()
+
+    await mgr.register_node(FakeWS(), _reg(user["id"]))
+    # The provider's own wallet wins over the configured fallback.
+    assert captured["wallet"] == "ProviderWa11et1111111111111111111111111111111"
+
+
+async def test_attestation_falls_back_to_configured_wallet(monkeypatch):
+    db = FakeSupabase()
+    user = db.add_user(wallet_address=None)
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    _enable(monkeypatch)
+
+    captured = {}
+
+    async def check(self, wallet):
+        captured["wallet"] = wallet
+        return CovenantCheckResult(ok=False, tool="covenant_reputation", error="boom")
+
+    monkeypatch.setattr(nm, "get_covenant_service", lambda: type("S", (), {"check_reputation": check})())
+    mgr = nm.NodeManager()
+
+    await mgr.register_node(FakeWS(), _reg(user["id"]))
+    assert captured["wallet"] == REAL_WALLET
+
+
+async def test_attestation_skipped_without_any_wallet(monkeypatch):
+    db = FakeSupabase()
+    user = db.add_user(wallet_address=None)
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    _enable(monkeypatch, COVENANT_PROVIDER_WALLET_ADDRESS="")
+
+    async def boom(self, wallet):
+        raise AssertionError("covenant check must not run without a wallet")
+
+    monkeypatch.setattr(nm, "get_covenant_service", lambda: type("S", (), {"check_reputation": boom})())
+    mgr = nm.NodeManager()
+
+    conn = await mgr.register_node(FakeWS(), _reg(user["id"]))
+    assert conn.attestation is None
+
+
 async def test_attestation_disabled_with_wallet_set_skips_check(monkeypatch):
     # Even with a wallet configured, the flag must gate the whole path.
     db = FakeSupabase()

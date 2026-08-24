@@ -123,20 +123,20 @@ class Settings(BaseSettings):
         False,
         description=(
             "When true, node registration runs an OpenCovenant reputation "
-            "check against the provider's wallet. Defaults to false so the "
-            "existing registration flow is untouched. The check is fail-soft: "
-            "a network error or timeout records 'no attestation' but never "
-            "blocks registration. Requires COVENANT_PROVIDER_WALLET_ADDRESS to "
-            "resolve the provider's wallet."
+            "check against the registering provider's own wallet "
+            "(users.wallet_address), so the verdict differentiates providers. "
+            "Defaults to false so the existing registration flow is untouched. "
+            "The check is fail-soft: a network error or timeout records 'no "
+            "attestation' but never blocks registration."
         ),
     )
     COVENANT_PROVIDER_WALLET_ADDRESS: str = Field(
         "",
         description=(
-            "Solana wallet used for covenant_reputation checks on node "
-            "registration (a provider's wallet, e.g. their treasury address). "
-            "Empty disables the check even when COVENANT_ENABLE_ATTESTATION is "
-            "true."
+            "Fallback Solana wallet for covenant_reputation checks on node "
+            "registration, used only when the provider's users row has no "
+            "wallet_address. With neither set, the check is skipped even when "
+            "COVENANT_ENABLE_ATTESTATION is true."
         ),
     )
 

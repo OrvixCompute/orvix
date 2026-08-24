@@ -185,7 +185,7 @@ class NodeManager:
         # Validate the provider exists.
         user = (
             db.table("users")
-            .select("id, provider_secret_hash")
+            .select("id, provider_secret_hash, wallet_address")
             .eq("id", msg.provider_id)
             .limit(1)
             .execute()
@@ -210,19 +210,21 @@ class NodeManager:
         # engine list to ["chat"] so pre-capability nodes still serve chat.
         engines = list(msg.engines) if msg.engines else ["chat"]
 
-        # Opt-in OpenCovenant attestation. Off by default; when enabled (flag +
-        # wallet configured) it runs a fail-soft reputation check against the
-        # provider's wallet and stores the verdict on the row. A network error,
-        # timeout, or sub-threshold score never blocks registration — it just
-        # records "no attestation", so existing nodes keep working unchanged.
+        # Opt-in OpenCovenant attestation. Off by default; when enabled it runs a
+        # fail-soft reputation check against the registering provider's own wallet
+        # (users.wallet_address), so the verdict differentiates providers.
+        # COVENANT_PROVIDER_WALLET_ADDRESS is only a fallback for rows without a
+        # wallet. A network error, timeout, or sub-threshold score never blocks
+        # registration — it just records "no attestation", so existing nodes keep
+        # working unchanged.
         attestation = None
-        if settings.COVENANT_ENABLE_ATTESTATION and settings.COVENANT_PROVIDER_WALLET_ADDRESS:
-            try:
-                attestation = await self._run_covenant_attestation(
-                    msg.provider_id, settings.COVENANT_PROVIDER_WALLET_ADDRESS
-                )
-            except Exception as exc:  # noqa: BLE001 — attestation must never break registration
-                logger.warning("Covenant attestation failed for provider {}: {}", msg.provider_id, exc)
+        if settings.COVENANT_ENABLE_ATTESTATION:
+            wallet = user.data[0].get("wallet_address") or settings.COVENANT_PROVIDER_WALLET_ADDRESS
+            if wallet:
+                try:
+                    attestation = await self._run_covenant_attestation(msg.provider_id, wallet)
+                except Exception as exc:  # noqa: BLE001 — attestation must never break registration
+                    logger.warning("Covenant attestation failed for provider {}: {}", msg.provider_id, exc)
 
         conn = NodeConnection(
             node_id=node_id,
