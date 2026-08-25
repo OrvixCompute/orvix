@@ -202,7 +202,7 @@ class NodeManager:
         # Validate the provider exists.
         user = (
             db.table("users")
-            .select("id, provider_secret_hash")
+            .select("id, provider_secret_hash, wallet_address")
             .eq("id", msg.provider_id)
             .limit(1)
             .execute()
@@ -228,15 +228,24 @@ class NodeManager:
         engines = list(msg.engines) if msg.engines else ["chat"]
 
         # Opt-in OpenCovenant attestation. Off by default; when enabled (flag +
-        # wallet configured) it runs a fail-soft reputation check against the
+        # wallet resolved) it runs a fail-soft reputation check against the
         # provider's wallet and stores the verdict on the row. A network error,
         # timeout, or sub-threshold score never blocks registration — it just
         # records "no attestation", so existing nodes keep working unchanged.
+        #
+        # Wallet resolution: the provider's own wallet_address from the users
+        # row takes priority; COVENANT_PROVIDER_WALLET_ADDRESS is the fallback
+        # so operators can override for testing or when the user row is missing
+        # a wallet.
         attestation = None
-        if settings.COVENANT_ENABLE_ATTESTATION and settings.COVENANT_PROVIDER_WALLET_ADDRESS:
+        provider_wallet = (
+            (user.data[0].get("wallet_address") or "").strip()
+            or settings.COVENANT_PROVIDER_WALLET_ADDRESS
+        )
+        if settings.COVENANT_ENABLE_ATTESTATION and provider_wallet:
             try:
                 attestation = await self._run_covenant_attestation(
-                    msg.provider_id, settings.COVENANT_PROVIDER_WALLET_ADDRESS
+                    msg.provider_id, provider_wallet
                 )
             except Exception as exc:  # noqa: BLE001 — attestation must never break registration
                 logger.warning("Covenant attestation failed for provider {}: {}", msg.provider_id, exc)

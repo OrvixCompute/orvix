@@ -164,9 +164,37 @@ def test_image_daily_reset_at_utc_rollover(monkeypatch):
 
 # --- endpoint integration --------------------------------------------------
 def test_chat_endpoint_free_then_402(monkeypatch):
+    from app.services import node_manager as nm_mod
+    from app.services.node_manager import NodeConnection
+    from app.models.protocol import JobResultMessage
+    from decimal import Decimal
+
     monkeypatch.setattr(settings, "CHAT_LIFETIME_FREE_LIMIT", 2)
     db = FakeSupabase()
     db.add_user(balance_usdc=0.0)
+
+    # Wire a fake node so the endpoint doesn't 503.
+    provider = db.add_user()
+    node = NodeConnection(
+        node_id="node-quota", provider_id=provider["id"], websocket=None,
+        model="qwen-2.5-7b", gpu_info={}, max_concurrent_jobs=4,
+        models_supported=["qwen-2.5-7b"],
+    )
+    monkeypatch.setattr(nm_mod.node_manager, "select_node", lambda m, t: node)
+
+    async def fake_dispatch(node_, job):
+        return JobResultMessage(
+            job_id=job.job_id, status="completed",
+            result={"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"},
+                                 "finish_reason": "stop"}]},
+            prompt_tokens=1, completion_tokens=1,
+        )
+
+    async def fake_settle(node_, cost):
+        return Decimal("0")
+
+    monkeypatch.setattr(nm_mod.node_manager, "dispatch_job", fake_dispatch)
+    monkeypatch.setattr(nm_mod.node_manager, "settle_job", fake_settle)
 
     def dep():
         return {

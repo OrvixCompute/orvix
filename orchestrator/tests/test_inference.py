@@ -85,9 +85,62 @@ def _make_user(db, tier="gold", balance=1000.0):
     return db.add_user(tier=tier, balance_usdc=balance)
 
 
-def test_happy_path_non_streaming(client_and_db):
+def _wire_fake_node(monkeypatch, db, model="qwen-2.5-7b", prompt_tokens=5, completion_tokens=3):
+    """Wire a fake node that returns a completed job.
+
+    Returns the provider dict so callers can inspect provider_id on recorded jobs.
+    """
+    from app.services import node_manager as nm_mod
+    from app.services.node_manager import NodeConnection
+
+    provider = db.add_user()
+    node = NodeConnection(
+        node_id="node-fake",
+        provider_id=provider["id"],
+        websocket=None,
+        model=model,
+        gpu_info={},
+        max_concurrent_jobs=4,
+        models_supported=[model],
+    )
+    monkeypatch.setattr(nm_mod.node_manager, "select_node", lambda m, t: node)
+
+    async def fake_dispatch(node_, job):
+        from app.models.protocol import JobResultMessage
+
+        return JobResultMessage(
+            job_id=job.job_id,
+            status="completed",
+            result={
+                "id": f"chatcmpl-{job.job_id}",
+                "object": "chat.completion",
+                "model": job.model,
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": "hi"},
+                     "finish_reason": "stop"}
+                ],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
+            },
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+    async def fake_settle(node_, cost):
+        return Decimal("0")
+
+    monkeypatch.setattr(nm_mod.node_manager, "dispatch_job", fake_dispatch)
+    monkeypatch.setattr(nm_mod.node_manager, "settle_job", fake_settle)
+    return provider
+
+
+def test_happy_path_non_streaming(client_and_db, monkeypatch):
     client, db = client_and_db
     _make_user(db)
+    _wire_fake_node(monkeypatch, db)
     resp = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
@@ -100,20 +153,22 @@ def test_happy_path_non_streaming(client_and_db):
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
-    assert body["choices"][0]["message"]["content"].startswith("This is a mock response")
+    assert body["choices"][0]["message"]["content"] == "hi"
     assert body["usage"]["total_tokens"] > 0
     assert "X-Orvix-Cost" in resp.headers
+    assert resp.headers["X-Orvix-Node"] == "node-fake"
     # A job row was recorded and the balance dropped.
     assert len(db._table("jobs").rows) == 1
     assert db._table("users").rows[0]["balance_usdc"] < 1000.0
 
 
-def test_tier_header_is_stake_based(client_and_db):
+def test_tier_header_is_stake_based(client_and_db, monkeypatch):
     """The served tier comes from staked_orvx, not the stored users.tier column."""
     client, db = client_and_db
     # Stored tier says bronze, but the stake puts them at diamond.
     _make_user(db, tier="bronze")
     db._table("users").rows[0]["staked_orvx"] = 250000.0
+    _wire_fake_node(monkeypatch, db)
     resp = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
@@ -127,9 +182,10 @@ def test_tier_header_is_stake_based(client_and_db):
     assert resp.headers["X-Orvix-Tier"] == "diamond"
 
 
-def test_tier_header_bronze_when_unstaked(client_and_db):
+def test_tier_header_bronze_when_unstaked(client_and_db, monkeypatch):
     client, db = client_and_db
     _make_user(db, tier="gold")  # stored column ignored
+    _wire_fake_node(monkeypatch, db)
     resp = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
@@ -143,61 +199,58 @@ def test_tier_header_bronze_when_unstaked(client_and_db):
     assert resp.headers["X-Orvix-Tier"] == "bronze"
 
 
-def test_mock_job_does_not_accrue_budget(client_and_db):
-    """Mock-served jobs aren't billable revenue, so they must not touch accounting."""
-    client, db = client_and_db
-    _make_user(db)
-    resp = client.post(
-        "/v1/chat/completions",
-        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
-        json={
-            "model": "qwen-2.5-7b",
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 64,
-        },
-    )
-    assert resp.status_code == 200
-    # The job was recorded as a mock...
-    assert db._table("jobs").rows[0]["is_mock"] is True
-    # ...and no revenue split ran, so no global_accounting row was created/touched.
-    acct = [r for r in db._table("global_accounting").rows if r.get("id") == 1]
-    assert acct == [] or float(acct[0]["buyback_budget_usdc"]) == 0
-
-
-def test_record_job_real_accrues_budget_but_mock_does_not():
-    """_record_job splits the fee only for real jobs (is_mock=False)."""
+def test_record_job_accrues_revenue_split():
+    """_record_job splits the fee into buyback/treasury/operations."""
     from app.routes import inference as inference_route
 
-    # Real job -> accounting accrues.
     db = FakeSupabase()
     inference_route._record_job(
         db, user_id="u1", api_key_id="k1", node_id="node-1", provider_id="prov-1",
         model="qwen-2.5-7b",
         prompt_tokens=1000, completion_tokens=1000, cost=Decimal("1.0"),
-        latency_ms=5, is_mock=False,
+        latency_ms=5,
     )
     acct = next(r for r in db._table("global_accounting").rows if r["id"] == 1)
     # Platform fee = cost - 70% provider = 0.30; buyback = 50% of fee = 0.15.
     assert float(acct["buyback_budget_usdc"]) == pytest.approx(0.15)
     assert float(acct["treasury_balance_usdc"]) == pytest.approx(0.09)
     assert float(acct["operations_balance_usdc"]) == pytest.approx(0.06)
-
-    # Mock job -> no accounting row created at all.
-    db2 = FakeSupabase()
-    inference_route._record_job(
-        db2, user_id="u1", api_key_id="k1", node_id=None, provider_id=None,
-        model="qwen-2.5-7b",
-        prompt_tokens=1000, completion_tokens=1000, cost=Decimal("1.0"),
-        latency_ms=5, is_mock=True,
-    )
-    assert len(db2._table("jobs").rows) == 1
-    assert db2._table("jobs").rows[0]["is_mock"] is True
-    assert [r for r in db2._table("global_accounting").rows if r.get("id") == 1] == []
+    assert db._table("jobs").rows[0]["is_mock"] is False
 
 
-def test_streaming_emits_done(client_and_db):
+def test_streaming_emits_done(client_and_db, monkeypatch):
     client, db = client_and_db
     _make_user(db)
+    _wire_fake_node(monkeypatch, db, model="mistral-7b")
+
+    async def fake_stream_dispatch(node_, job):
+        from app.models.protocol import JobChunkMessage
+
+        async def gen():
+            yield JobChunkMessage(
+                job_id=job.job_id,
+                chunk={
+                    "id": f"chatcmpl-{job.job_id}",
+                    "object": "chat.completion.chunk",
+                    "model": job.model,
+                    "choices": [{"index": 0, "delta": {"content": "hello"}, "finish_reason": None}]
+                },
+            )
+            yield JobChunkMessage(
+                job_id=job.job_id,
+                chunk={
+                    "id": f"chatcmpl-{job.job_id}",
+                    "object": "chat.completion.chunk",
+                    "model": job.model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+                },
+                is_final=True,
+            )
+        return gen()
+
+    from app.services import node_manager as nm_mod
+    monkeypatch.setattr(nm_mod.node_manager, "dispatch_job", fake_stream_dispatch)
+
     with client.stream(
         "POST",
         "/v1/chat/completions",
@@ -215,9 +268,10 @@ def test_streaming_emits_done(client_and_db):
     assert "data: [DONE]" in text
 
 
-def test_insufficient_balance_returns_402(client_and_db):
+def test_insufficient_balance_returns_402(client_and_db, monkeypatch):
     client, db = client_and_db
     _make_user(db, balance=0.0)
+    _wire_fake_node(monkeypatch, db)
     resp = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
@@ -246,9 +300,10 @@ def test_invalid_model_returns_400(client_and_db):
     assert resp.json()["error"]["code"] == "model_not_found"
 
 
-def test_rate_limit_triggers(client_and_db):
+def test_rate_limit_triggers(client_and_db, monkeypatch):
     client, db = client_and_db
     _make_user(db, balance=1_000_000.0)
+    _wire_fake_node(monkeypatch, db)
     headers = {"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"}
     payload = {
         "model": "qwen-2.5-7b",
@@ -323,32 +378,9 @@ def test_node_served_job_records_the_provider(client_and_db, monkeypatch):
     assert row["is_mock"] is False
 
 
-def test_mock_job_has_no_provider(client_and_db):
-    # Nobody served it, so there is nobody to attribute it to.
-    client, db = client_and_db
-    _make_user(db)
-    resp = client.post(
-        "/v1/chat/completions",
-        headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
-        json={"model": "qwen-2.5-7b", "messages": [{"role": "user", "content": "hi"}]},
-    )
-    assert resp.status_code == 200
-    row = db._table("jobs").rows[0]
-    assert row["is_mock"] is True
-    assert row["provider_id"] is None
-
-
-# --- refusing to fake it ---------------------------------------------------
-def test_no_node_returns_503_when_mock_is_disabled(client_and_db, monkeypatch):
-    """With no node and the mock off, chat must fail like images already do.
-
-    A mock reply is indistinguishable from a real one apart from the
-    X-Orvix-Node header, so serving it to real users misrepresents an empty
-    network as a working one.
-    """
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
+# --- refusing when no node -------------------------------------------------
+def test_no_node_returns_503(client_and_db):
+    """With no node available, chat returns 503 — no mock fallback."""
     client, db = client_and_db
     _make_user(db)
 
@@ -371,10 +403,8 @@ def test_refusal_does_not_consume_the_free_quota(client_and_db, monkeypatch):
     effect, so checking it first would bill them for a request the network
     could never have served.
     """
-    from app.config import settings
     from app.services import quota_service
 
-    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
     client, db = client_and_db
     _make_user(db)
 
@@ -622,10 +652,8 @@ def test_busy_nodes_report_capacity_not_absence(client_and_db, monkeypatch):
     is wrong in a way that matters: capacity is transient and worth retrying,
     an unserved model is not.
     """
-    from app.config import settings
     from app.services import node_manager as nm_mod
 
-    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
     client, db = client_and_db
     _make_user(db)
     provider = db.add_user()
@@ -649,10 +677,8 @@ def test_busy_nodes_report_capacity_not_absence(client_and_db, monkeypatch):
 
 def test_unserved_model_still_reports_absence(client_and_db, monkeypatch):
     """A node that serves a *different* model must not be read as capacity."""
-    from app.config import settings
     from app.services import node_manager as nm_mod
 
-    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
     client, db = client_and_db
     _make_user(db)
     provider = db.add_user()
@@ -679,10 +705,8 @@ def test_refusal_skips_the_balance_lookup(client_and_db, monkeypatch):
     trip. Under load those round trips queued behind each other and turned a
     refusal into a multi-second wait, so the refusal path must not touch them.
     """
-    from app.config import settings
     from app.services.billing_service import BillingService
 
-    monkeypatch.setattr(settings, "ALLOW_MOCK_INFERENCE", False)
     client, db = client_and_db
     _make_user(db)
 

@@ -2,12 +2,8 @@
 
 Routing:
   - If a ready node supports the model, the job is dispatched to it (real tokens,
-    real billing, provider earns a share, jobs.is_mock = False).
+    real billing, provider earns a share).
   - If no node is available the request is refused with 503 no_chat_provider.
-    Setting ALLOW_MOCK_INFERENCE serves an in-process mock instead so local
-    development can continue against an empty network (jobs.is_mock = True);
-    it is off by default because a mock reply is indistinguishable from a
-    real one apart from the X-Orvix-Node header.
 """
 
 import asyncio
@@ -29,13 +25,7 @@ from app.exceptions import (
     ValidationError,
 )
 from app.logger import logger
-from app.models.inference import (
-    ChatCompletionChoice,
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatMessage,
-    Usage,
-)
+from app.models.inference import ChatCompletionRequest
 from app.models.protocol import JobMessage
 from app.services import inference_service, quota_service, rate_limit_service, tier_service
 from app.services.billing_service import BillingService
@@ -60,14 +50,13 @@ def _record_job(
     *,
     user_id: str,
     api_key_id: str,
-    node_id: str | None,
-    provider_id: str | None,
+    node_id: str,
+    provider_id: str,
     model: str,
     prompt_tokens: int,
     completion_tokens: int,
     cost: Decimal,
     latency_ms: int,
-    is_mock: bool,
     status: str = "completed",
     error_message: str | None = None,
 ) -> None:
@@ -89,14 +78,9 @@ def _record_job(
             "latency_ms": latency_ms,
             "status": status,
             "error_message": error_message,
-            "is_mock": is_mock,
+            "is_mock": False,
         }
     ).execute()
-
-    # Mock jobs (no real node served them) are not billable revenue, so they must
-    # not feed the buyback/treasury/operations accounting. Only split real jobs.
-    if is_mock:
-        return
 
     # Split the platform fee (cost - provider share) 50/30/20 into the buyback
     # budget / treasury / operations buckets. Best-effort: the response is already
@@ -150,17 +134,9 @@ async def chat_completions(
     # a burst, refusals took seconds each while queued behind blocking Supabase
     # calls, to deliver an answer the registry had available immediately.
     node = await node_manager.acquire_node(body.model, tier)
-    if node is None and not settings.ALLOW_MOCK_INFERENCE:
-        # Fail loudly rather than hand back a canned answer: a mock reply is
-        # indistinguishable from a real one apart from a response header, so
-        # serving it to real users misrepresents the network as working. This
-        # mirrors what /v1/images/generations already does.
-        #
+    if node is None:
         # Separate the two reasons: "everyone is busy" is transient and worth a
-        # retry, "nobody serves this model" is not. Collapsing them into one
-        # message told users no providers existed while providers were in fact
-        # working, and hid from operators which of the two they had to fix —
-        # more capacity, or a node that loads the model.
+        # retry, "nobody serves this model" is not.
         reason = node_manager.unavailable_reason(body.model)
         logger.warning("No node for {} ({}) — refusing the request", body.model, reason)
         if reason == "at_capacity":
@@ -200,15 +176,9 @@ async def chat_completions(
                 },
             )
 
-    if node is None:
-        logger.warning("No nodes available for {} — falling back to mock", body.model)
-        resp = await _serve_mock(
-            db, billing, user, api_key, body, prompt_tokens, tier, started, free=free
-        )
-    else:
-        resp = await _serve_node(
-            db, billing, user, api_key, node, body, prompt_tokens, tier, started, free=free
-        )
+    resp = await _serve_node(
+        db, billing, user, api_key, node, body, prompt_tokens, tier, started, free=free
+    )
 
     resp.headers["X-Orvix-Quota-Type"] = quota["type"]
     if quota["remaining"] is not None:
@@ -280,7 +250,6 @@ async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tie
         completion_tokens=completion_tokens,
         cost=cost,
         latency_ms=latency_ms,
-        is_mock=False,
     )
 
     payload = result.result or {}
@@ -336,7 +305,6 @@ async def _serve_node_streaming(
                 completion_tokens=completion_tokens,
                 cost=cost,
                 latency_ms=latency_ms,
-                is_mock=False,
             )
         except Exception as exc:  # noqa: BLE001 — stream already delivered
             logger.error("Post-stream billing failed: {}", exc)
@@ -345,117 +313,4 @@ async def _serve_node_streaming(
         event_gen(),
         media_type="text/event-stream",
         headers={"X-Orvix-Tier": tier, "X-Orvix-Node": node.node_id, "Cache-Control": "no-cache"},
-    )
-
-
-# ===========================================================================
-# Mock fallback path (no nodes connected)
-# ===========================================================================
-async def _serve_mock(db, billing, user, api_key, body, prompt_tokens, tier, started, free=False):
-    content, completion_tokens = inference_service.generate_mock(body.messages, body.max_tokens)
-    cost = (
-        Decimal("0")
-        if free
-        else inference_service.calculate_cost(body.model, prompt_tokens, completion_tokens, tier)
-    )
-
-    if body.stream:
-        return await _serve_mock_streaming(
-            db, billing, user, api_key, body, content, prompt_tokens, completion_tokens, cost, tier, started, free=free
-        )
-
-    if not free:
-        billing.deduct_usdc(user["id"], cost)
-    latency_ms = int((time.perf_counter() - started) * 1000)
-    _record_job(
-        db,
-        user_id=user["id"],
-        api_key_id=api_key["id"],
-        node_id=None,
-        provider_id=None,
-        model=body.model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        cost=cost,
-        latency_ms=latency_ms,
-        is_mock=True,
-    )
-    completion = ChatCompletionResponse(
-        id=f"chatcmpl-{uuid.uuid4()}",
-        created=int(time.time()),
-        model=body.model,
-        choices=[
-            ChatCompletionChoice(
-                index=0,
-                message=ChatMessage(role="assistant", content=content),
-                finish_reason="stop",
-            )
-        ],
-        usage=Usage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-        ),
-    )
-    return JSONResponse(
-        content=completion.model_dump(),
-        headers={"X-Orvix-Tier": tier, "X-Orvix-Cost": str(cost), "X-Orvix-Node": "mock"},
-    )
-
-
-async def _serve_mock_streaming(
-    db, billing, user, api_key, body, content, prompt_tokens, completion_tokens, cost, tier, started, free=False
-):
-    if not free:
-        billing.deduct_usdc(user["id"], cost)
-    completion_id = f"chatcmpl-{uuid.uuid4()}"
-    created = int(time.time())
-
-    async def event_gen():
-        first = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": body.model,
-            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-        }
-        yield f"data: {json.dumps(first)}\n\n"
-        for piece in inference_service.stream_mock_chunks(content):
-            chunk = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": body.model,
-                "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n"
-            await asyncio.sleep(0.05)
-        final = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": body.model,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-        }
-        yield f"data: {json.dumps(final)}\n\n"
-        yield "data: [DONE]\n\n"
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        _record_job(
-            db,
-            user_id=user["id"],
-            api_key_id=api_key["id"],
-            node_id=None,
-            provider_id=None,
-            model=body.model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cost=cost,
-            latency_ms=latency_ms,
-            is_mock=True,
-        )
-
-    return StreamingResponse(
-        event_gen(),
-        media_type="text/event-stream",
-        headers={"X-Orvix-Tier": tier, "X-Orvix-Cost": str(cost), "X-Orvix-Node": "mock"},
     )

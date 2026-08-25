@@ -101,6 +101,53 @@ async def test_attestation_enabled_stores_verdict_on_row(monkeypatch):
     assert row["covenant_attestation"]["score"] == 250
 
 
+async def test_attestation_uses_provider_wallet_over_env_var(monkeypatch):
+    """The provider's own wallet_address from the users row takes priority
+    over the COVENANT_PROVIDER_WALLET_ADDRESS env var."""
+    db = FakeSupabase()
+    provider_wallet = "ProviderWallet11111111111111111111111111111"
+    user = db.add_user(wallet_address=provider_wallet)
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    _enable(monkeypatch, COVENANT_PROVIDER_WALLET_ADDRESS="EnvVarWallet22222222222222222222222222222")
+
+    captured = {}
+
+    async def capture_wallet(self, wallet):
+        captured["wallet"] = wallet
+        return await _fake_ok(score=300)(self, wallet)
+
+    fake_svc = type("S", (), {"check_reputation": capture_wallet})
+    monkeypatch.setattr(nm, "get_covenant_service", lambda: fake_svc())
+    mgr = nm.NodeManager()
+
+    conn = await mgr.register_node(FakeWS(), _reg(user["id"]))
+    assert captured["wallet"] == provider_wallet
+    assert conn.attestation is not None
+    assert conn.attestation["wallet"] == provider_wallet
+
+
+async def test_attestation_falls_back_to_env_var_when_user_wallet_empty(monkeypatch):
+    """When the provider's wallet_address is empty, the env var is used."""
+    db = FakeSupabase()
+    env_wallet = "EnvVarWallet33333333333333333333333333333"
+    user = db.add_user(wallet_address="")
+    monkeypatch.setattr(nm, "get_supabase", lambda: db)
+    _enable(monkeypatch, COVENANT_PROVIDER_WALLET_ADDRESS=env_wallet)
+
+    captured = {}
+
+    async def capture_wallet(self, wallet):
+        captured["wallet"] = wallet
+        return await _fake_ok(score=300)(self, wallet)
+
+    fake_svc = type("S", (), {"check_reputation": capture_wallet})
+    monkeypatch.setattr(nm, "get_covenant_service", lambda: fake_svc())
+    mgr = nm.NodeManager()
+
+    conn = await mgr.register_node(FakeWS(), _reg(user["id"]))
+    assert captured["wallet"] == env_wallet
+
+
 async def test_attestation_below_min_score_records_not_attested(monkeypatch):
     db = FakeSupabase()
     user = db.add_user()

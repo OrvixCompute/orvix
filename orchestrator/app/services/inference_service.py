@@ -1,13 +1,7 @@
-"""Mock inference: token estimation, mock generation, and cost calculation.
+"""Token estimation and cost calculation for inference billing."""
 
-Everything here is a stand-in until real GPU nodes are integrated. The billing
-math, however, is the real thing — this is what lets the whole charging flow be
-built and tested without any GPUs.
-"""
-
-import random
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Iterator, List
+from typing import List
 
 import tiktoken
 
@@ -57,34 +51,6 @@ def estimate_prompt_tokens(messages: List[ChatMessage]) -> int:
     # Small per-message overhead, mirroring OpenAI's accounting.
     total += 4 * len(messages)
     return total
-
-
-def _last_user_content(messages: List[ChatMessage]) -> str:
-    for m in reversed(messages):
-        if m.role == "user":
-            return m.content
-    return messages[-1].content if messages else ""
-
-
-def generate_mock(messages: List[ChatMessage], max_tokens: int) -> tuple[str, int]:
-    """Produce mock content and a completion-token count."""
-    # Clamp the range so it stays valid even when max_tokens < 50.
-    low = min(50, max_tokens)
-    high = min(max_tokens, 250)
-    completion_tokens = random.randint(low, high)
-    snippet = _last_user_content(messages)[:60]
-    content = (
-        "This is a mock response from Orvix. Real inference coming soon. "
-        f"You asked about: {snippet}..."
-    )
-    return content, completion_tokens
-
-
-def stream_mock_chunks(content: str) -> Iterator[str]:
-    """Yield the mock content in ~5-token chunks (caller handles SSE framing + delay)."""
-    tokens = _encoder.encode(content)
-    for i in range(0, len(tokens), 5):
-        yield _encoder.decode(tokens[i : i + 5])
 
 
 def quantize_usdc(value: Decimal) -> Decimal:

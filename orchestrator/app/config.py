@@ -141,15 +141,6 @@ class Settings(BaseSettings):
     )
 
     # --- Staking / tokenomics (whitepaper alignment) -----------------------
-    ALLOW_MOCK_INFERENCE: bool = Field(
-        False,
-        description=(
-            "Serve a canned response when no node can take a chat job, instead of "
-            "returning 503. Useful for developing against an empty network; must "
-            "stay false anywhere real users can reach, since the reply is "
-            "indistinguishable from a real one apart from the X-Orvix-Node header."
-        ),
-    )
     REQUIRE_STAKE_FOR_PROVIDER: bool = Field(
         False,
         description="When false (alpha), provider register skips the staked_orvx minimum check",
