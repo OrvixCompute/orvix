@@ -6,7 +6,6 @@ Routing:
   - If no node is available the request is refused with 503 no_chat_provider.
 """
 
-import asyncio
 import json
 import time
 import uuid

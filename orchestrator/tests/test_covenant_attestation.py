@@ -144,7 +144,7 @@ async def test_attestation_falls_back_to_env_var_when_user_wallet_empty(monkeypa
     monkeypatch.setattr(nm, "get_covenant_service", lambda: fake_svc())
     mgr = nm.NodeManager()
 
-    conn = await mgr.register_node(FakeWS(), _reg(user["id"]))
+    await mgr.register_node(FakeWS(), _reg(user["id"]))
     assert captured["wallet"] == env_wallet
 
 
