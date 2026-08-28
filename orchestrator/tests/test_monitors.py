@@ -1,12 +1,42 @@
 """Tests for the monitor service: evaluation, dedup, cursors, webhook outbox."""
 
+import logging
 from datetime import datetime, timezone
 
 import pytest
+from loguru import logger as loguru_logger
 from solders.pubkey import Pubkey
 
 from app.services import monitor_service
 from app.services.monitor_service import _transfers_of_mint, monitor_service as svc
+
+
+@pytest.fixture
+def loguru_capture():
+    """Capture loguru INFO+ lines (caplog does not see loguru records)."""
+    records: list[str] = []
+
+    class _Sink(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage().strip())
+
+    logger = logging.getLogger("loguru")
+    logger.handlers = []
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = _Sink()
+    logger.addHandler(handler)
+
+    def interop(message: str) -> None:
+        record = logger.makeRecord("loguru", logging.INFO, "", 0, message, None, None)
+        logger.handle(record)
+
+    sink_id = loguru_logger.add(interop, level="INFO", format="{message}")
+    try:
+        yield records
+    finally:
+        loguru_logger.remove(sink_id)
+        logger.removeHandler(handler)
 
 
 def _iso(dt: datetime | None = None) -> str:
@@ -328,3 +358,52 @@ async def test_wallet_monitor_evaluation_skips_ai_analysis(monkeypatch):
     monitor = _monitor(target_type="wallet", conditions=[{"type": "new_activity"}])
     await svc._evaluate_monitor(db, monitor)
     assert analyzed == []
+
+
+# --- cycle summary logging ------------------------------------------------
+
+def _make_due_monitors_db(n: int) -> FakeAlertDb:
+    """A FakeAlertDb whose monitors query returns n due monitors."""
+    db = FakeAlertDb()
+    db.monitors = [
+        {"id": f"m{i}", "last_checked_at": None, "is_active": True} for i in range(n)
+    ]
+    return db
+
+
+async def _cycle_with_fake_eval(monkeypatch, db: FakeAlertDb) -> None:
+    """process_due_monitors with a no-op evaluation."""
+    for m in db.monitors:
+        m["target_type"] = "token"
+        m["conditions"] = [{"type": "accumulation_score", "gte": 70}]
+
+    async def fake_eval(self, _db, monitor):
+        pass
+
+    monkeypatch.setattr(monitor_service.MonitorService, "_evaluate_monitor", fake_eval)
+    monkeypatch.setattr(monitor_service, "get_supabase", lambda: db)
+    await svc.process_due_monitors()
+
+
+@pytest.mark.asyncio
+async def test_monitor_cycle_counts_logged(monkeypatch, loguru_capture):
+    """process_due_monitors emits a monitor_cycle line with evaluated/alerts/webhooks."""
+    svc._cycle_alerts.append("a-1")
+    svc._cycle_webhooks.append("w-1")
+    db = _make_due_monitors_db(2)
+    await _cycle_with_fake_eval(monkeypatch, db)
+    lines = [r for r in loguru_capture if "monitor_cycle" in r]
+    assert len(lines) == 1
+    msg = lines[0]
+    assert "monitors_evaluated=2" in msg
+    assert "alerts_fired=" in msg
+    assert "webhooks_dispatched=" in msg
+    assert svc._cycle_alerts == [] and svc._cycle_webhooks == []
+
+
+@pytest.mark.asyncio
+async def test_monitor_cycle_skips_log_when_nothing_evaluated(monkeypatch, loguru_capture):
+    """No due monitors -> no monitor_cycle line, counters untouched."""
+    db = _make_due_monitors_db(0)
+    await _cycle_with_fake_eval(monkeypatch, db)
+    assert not any("monitor_cycle" in r for r in loguru_capture)

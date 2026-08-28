@@ -11,6 +11,7 @@ rather than exceptions.  Results are cached via the shared two-tier cache
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,7 +19,7 @@ import httpx
 from supabase import Client
 
 from app.config import settings
-from app.logger import logger
+from app.logger import log_intel_scan, logger
 from app.services import token_intel
 
 
@@ -252,13 +253,16 @@ async def analyze_social(
     Returns {"mint", "social_links", "social_score", "metrics", "as_of"}.
     Degrades gracefully — missing data sources yield null fields.
     """
+    _start = time.perf_counter()
     if not bypass_cache:
         cached = token_intel._cache_get("social", mint)
         if cached is not None:
+            log_intel_scan("social", mint, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
         cached = token_intel._db_cache_get(db, "social", mint)
         if cached is not None:
             token_intel._cache_put("social", mint, cached)
+            log_intel_scan("social", mint, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
 
     # --- DexScreener ---
@@ -309,4 +313,5 @@ async def analyze_social(
 
     token_intel._cache_put("social", mint, payload)
     token_intel._db_cache_put(db, "social", mint, payload)
+    log_intel_scan("social", mint, cache_hit=False, duration_ms=(time.perf_counter() - _start) * 1000)
     return payload

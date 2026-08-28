@@ -14,6 +14,7 @@ an exception. Results are cached in intel_scans so scans stay cheap.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections import defaultdict
 from decimal import Decimal
@@ -21,7 +22,7 @@ from typing import Optional
 
 from supabase import Client
 
-from app.logger import logger
+from app.logger import log_intel_scan, logger
 from app.services import token_intel
 from app.services.solana_service import get_solana_service
 
@@ -43,13 +44,16 @@ async def top_holders(db: Client, mint: str, *, bypass_cache: bool = False) -> d
     "top10_share", "as_of"}. Falls back to the watchlist-derived snapshot when
     getTokenLargestAccounts yields nothing (e.g. an unlisted mint).
     """
+    _start = time.perf_counter()
     if not bypass_cache:
         cached = token_intel._cache_get("top_holders", mint)
         if cached is not None:
+            log_intel_scan("top_holders", mint, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
         cached = token_intel._db_cache_get(db, "top_holders", mint)
         if cached is not None:
             token_intel._cache_put("top_holders", mint, cached)
+            log_intel_scan("top_holders", mint, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
 
     sol = get_solana_service()
@@ -109,6 +113,7 @@ async def top_holders(db: Client, mint: str, *, bypass_cache: bool = False) -> d
 
     token_intel._cache_put("top_holders", mint, payload)
     token_intel._db_cache_put(db, "top_holders", mint, payload)
+    log_intel_scan("top_holders", mint, cache_hit=False, duration_ms=(time.perf_counter() - _start) * 1000)
     return payload
 
 
@@ -120,6 +125,7 @@ async def early_buyers(db: Client, mint: str, *, limit: int = 10) -> list[dict]:
     signature}. Best-effort per holder — a holder with no parseable history is
     skipped, and the list is sorted by first-buy time ascending.
     """
+    _start = time.perf_counter()
     holders = await top_holders(db, mint)
     top = (holders.get("top_holders") or [])[:limit]
     sol = get_solana_service()
@@ -167,6 +173,7 @@ async def early_buyers(db: Client, mint: str, *, limit: int = 10) -> list[dict]:
             buyers.append(earliest)
 
     buyers.sort(key=lambda b: b.get("block_time") or 0)
+    log_intel_scan("early_buyers", mint, cache_hit=False, duration_ms=(time.perf_counter() - _start) * 1000)
     return buyers
 
 

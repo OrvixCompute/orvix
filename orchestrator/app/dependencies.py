@@ -17,10 +17,11 @@ from app.config import settings
 from app.database import get_supabase
 from app.exceptions import ForbiddenError, UnauthorizedError
 from app.logger import logger
-from app.services.api_key_service import hash_key
+from app.services.api_key_service import ALPHA_KEY_PREFIX, KEY_PREFIX, hash_key
 from app.services.auth_service import auth_service
 
 API_KEY_RE = re.compile(r"^orvx_sk_[A-Za-z0-9_-]{32}$")
+ALPHA_API_KEY_RE = re.compile(r"^orvx_alpha_[A-Za-z0-9_-]{32}$")
 
 
 def _bearer_token(request: Request) -> str:
@@ -103,17 +104,25 @@ def _touch_last_used(api_key_id: str) -> None:
         logger.warning("Failed to update last_used_at for {}: {}", api_key_id, exc)
 
 
+def _is_api_key(token: str) -> bool:
+    return token.startswith((KEY_PREFIX, ALPHA_KEY_PREFIX))
+
+
+def _valid_api_key_shape(token: str) -> bool:
+    return bool(API_KEY_RE.match(token) or ALPHA_API_KEY_RE.match(token))
+
+
 async def get_user_from_api_key(
     request: Request,
     background_tasks: BackgroundTasks,
     db: Client = Depends(get_supabase),
 ) -> dict:
-    """Resolve the user from an `orvx_sk_` API key bearer token.
+    """Resolve the user from an `orvx_sk_` or `orvx_alpha_` API key bearer token.
 
     Returns {"user": <user row>, "api_key": <api_key row>}.
     """
     token = _bearer_token(request)
-    if not API_KEY_RE.match(token):
+    if not _valid_api_key_shape(token):
         raise UnauthorizedError("Malformed API key", error_code="invalid_api_key")
 
     user, api_key = _resolve_api_key_user(db, token)
@@ -138,8 +147,8 @@ async def get_current_user_flexible(
     path, anything else is verified as a JWT.
     """
     token = _bearer_token(request)
-    if token.startswith("orvx_sk_"):
-        if not API_KEY_RE.match(token):
+    if _is_api_key(token):
+        if not _valid_api_key_shape(token):
             raise UnauthorizedError("Malformed API key", error_code="invalid_api_key")
         user, api_key = _resolve_api_key_user(db, token)
         background_tasks.add_task(_touch_last_used, api_key["id"])

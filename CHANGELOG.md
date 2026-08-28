@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Structured observability** (orchestrator): every log line emitted while
+  serving a request now carries the request's `request_id` (loguru
+  contextualize; already returned as `X-Request-ID` and echoed in error
+  bodies). Intel scans emit one `intel_scan` line each
+  (`scan_type`, `target`, `cache_hit`, `duration_ms`) from every entry point —
+  token, wallet, accumulation, holders, early_buyers, social, intelligence.
+  The monitor worker logs a per-cycle `monitor_cycle` summary
+  (`monitors_evaluated`, `alerts_fired`, `webhooks_dispatched`). Fail-soft
+  intel failures are reported to Sentry as warnings tagged with `scan_type`
+  and `target`, so a broken data source for one mint/wallet is filterable.
+  Production logs switched to an enqueued (thread-safe) JSON sink.
+  Docs: `docs/operations.md` gained an Observability section; ARCHITECTURE and
+  the orchestrator README document the log lines and Sentry tags.
 - **Token intelligence layer** (orchestrator): `GET /v1/tokens/{ca}` returns a
   token profile (Metaplex metadata, supply, Jupiter USDC price, configured-pool
   liquidity, cached holder snapshot, risk warnings); `GET /v1/tokens/{ca}/accumulation`
@@ -146,6 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Chat requests now wait briefly for a free slot instead of being dropped the moment the network is saturated.** A burst that overshoots a node's `max_concurrent_jobs` was refused on the spot even though the jobs ahead of it finish in a second or two — the request was rejected seconds before the capacity it needed existed. `node_manager.acquire_node()` polls for up to `CAPACITY_WAIT_SECONDS` (3s) and returns as soon as a slot opens. It skips the wait entirely when no node serves the model at all, so a request that can never succeed still fails immediately rather than holding the connection open
+- **Production logs are now an enqueued JSON sink.** The orchestrator's prod logging previously ran the serialize sink in-process; with multiple uvicorn workers or a busy event loop a slow stdout consumer could stall request handling. `enqueue=True` moves formatting off the request path (loguru's thread-safe queue). Dev output is unchanged
 - **`GET /v1/models` now marks which models are actually being served.** The catalog is static, so it listed three chat models while one node ran one of them — a client picking any of the others got a 503 with nothing to consult beforehand. Each entry gains an additive `available` flag derived from the live node registry; `GET /v1/network/stats` gains `models.chat_available` / `models.image_available` alongside the existing catalog counts, which had the same problem on the public dashboard
 - `GET /v1/network/stats` no longer contradicts itself. Only `nodes.online` was overlaid live on the cached snapshot, so a node reconnecting inside the 30s window published `online: 1` next to `ready: 0` and `offline: 1`. Every field the websocket registry can answer — the connection count, the per-status counts, and model availability — is now read live, and `offline` is derived as registered-minus-connected; registration totals, GPU breakdown, and job volume stay cached
 - **Wallet-auth challenges now survive a restart** and no longer invalidate each other (migration `017_auth_challenges`). The nonces lived in an in-memory dict on `AuthService`, which failed two ways in production: every orchestrator restart wiped all pending challenges — a challenge issued at 20:14:38 was rejected at 20:14:45, three seconds after a restart at 20:14:42 — and the dict was keyed by wallet holding one entry, so a second `/challenge` call silently broke the signature a user had already approved in their wallet. Both surfaced as the same opaque `401 Unknown or already-used challenge nonce`. Challenges are now rows keyed by nonce, still single-use and 5-minute-lived, swept when expired

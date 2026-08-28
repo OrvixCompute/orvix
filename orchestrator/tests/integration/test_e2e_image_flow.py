@@ -1,8 +1,12 @@
 """End-to-end: POST /v1/images/generations produces a file, row, and quota use."""
 
+import base64
+import json
 from datetime import datetime
 
 from app.config import settings
+
+import app.services.receipt_signer as rs
 
 from tests.integration.conftest import API_KEY
 
@@ -47,3 +51,24 @@ def test_full_image_flow(image_env):
     assert len(usage) == 1
     assert usage[0]["wallet_address"] == wallet
     assert usage[0]["count"] == 1
+
+
+def test_image_flow_emits_signed_receipts_when_enabled(image_env, monkeypatch):
+    client = image_env.client
+
+    monkeypatch.setattr(rs.settings, "RECEIPT_SIGNING_KEY", base64.b64encode(b"2" * 32).decode())
+    rs._loaded = False
+    try:
+        resp = client.post(
+            "/v1/images/generations",
+            headers=API_KEY,
+            json={"model": "flux-schnell", "prompt": "a fox", "size": "1024x1024"},
+        )
+        assert resp.status_code == 200, resp.text
+        receipts = json.loads(resp.headers["X-Orvix-Receipts"])
+        assert len(receipts) == 1
+        assert receipts[0]["payload"]["provider_id"] == "prov-1"
+        assert receipts[0]["payload"]["node_id"] == "node-1"
+        assert rs.verify_receipt(receipts[0]) is True
+    finally:
+        rs._loaded = False

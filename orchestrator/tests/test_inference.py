@@ -162,6 +162,39 @@ def test_happy_path_non_streaming(client_and_db, monkeypatch):
     assert db._table("users").rows[0]["balance_usdc"] < 1000.0
 
 
+def test_happy_path_emits_signed_receipt_when_enabled(client_and_db, monkeypatch):
+    """With a signing key configured, the response carries a verifiable receipt."""
+    import base64
+
+    import app.services.receipt_signer as rs
+
+    client, db = client_and_db
+    _make_user(db)
+    _wire_fake_node(monkeypatch, db, prompt_tokens=5, completion_tokens=3)
+
+    monkeypatch.setattr(rs.settings, "RECEIPT_SIGNING_KEY", base64.b64encode(b"1" * 32).decode())
+    rs._loaded = False
+
+    try:
+        resp = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer orvx_sk_testkey0testkey0testkey0testkey0"},
+            json={
+                "model": "qwen-2.5-7b",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 64,
+            },
+        )
+        assert resp.status_code == 200
+        assert "X-Orvix-Receipt" in resp.headers
+        receipt = json.loads(resp.headers["X-Orvix-Receipt"])
+        assert receipt["payload"]["node_id"] == "node-fake"
+        assert receipt["payload"]["completion_tokens"] == 3
+        assert rs.verify_receipt(receipt) is True
+    finally:
+        rs._loaded = False
+
+
 def test_tier_header_is_stake_based(client_and_db, monkeypatch):
     """The served tier comes from staked_orvx, not the stored users.tier column."""
     client, db = client_and_db

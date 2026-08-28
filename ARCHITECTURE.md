@@ -10,9 +10,15 @@ A central **orchestrator** exposes an OpenAI-compatible HTTP API, authenticates 
 routes each job to a connected **node**. Nodes run on provider machines, execute the job on a
 local inference backend, and stream the result back over a persistent WebSocket.
 
+On top of the inference path sits the **token-intelligence layer**: on-chain token/wallet
+scans, accumulation scoring, holder analysis, and user-deployed monitoring agents. It runs
+against plain Solana JSON-RPC (plus the Jupiter quote API for prices) and reuses the same
+node network to generate AI narratives on GPU nodes.
+
 The system is a **monorepo** with two independently deployable packages — `orchestrator/` and
-`orvix-node/` — plus a planned frontend. Keeping them together simplifies dependency
-management, keeps the shared protocol in sync, and lets a single CI cover both.
+`orvix-node/` — a shared `packages/protocol/` (Pydantic wire models) and a planned frontend.
+Keeping them together simplifies dependency management, keeps the shared protocol in sync, and
+lets a single CI cover both.
 
 ## 2. High-Level Architecture
 
@@ -34,7 +40,11 @@ management, keeps the shared protocol in sync, and lets a single CI cover both.
                                              └──────────────┘
 
 External:
-- Supabase (PostgreSQL): user accounts, API keys, nodes, job history
+- Supabase (PostgreSQL): user accounts, API keys, nodes, job history, intel cache
+- Solana JSON-RPC: on-chain reads (balances, signatures, parsed transactions)
+- Jupiter quote API: USDC price estimation for tokens
+- DexScreener / X API v2: social signals for tokens (optional)
+- Sentry: error tracking (opt-in)
 ```
 
 ## 3. Components
@@ -45,9 +55,11 @@ External:
 - **Role:** API gateway, authentication, job routing, node management.
 - **Stack:** FastAPI, async Python 3.11+.
 - **Key modules:**
-  - `app/routes/` — HTTP endpoints
-  - `app/services/` — business logic
+  - `app/routes/` — HTTP endpoints (inference, images, videos, tokens, wallets, agents, provider, admin, …)
+  - `app/services/` — business logic (billing, node manager, token-intel, monitor worker, payouts)
   - `app/services/node_manager.py` — node registry, selection, and job dispatch
+  - `app/services/token_intel.py` — token/wallet scans, accumulation, two-tier cache
+  - `app/services/monitor_service.py` — background evaluation of user monitors + webhook delivery
   - `app/dependencies.py` — auth dependencies (JWT and API key)
 
 ### 3.2 Node
@@ -86,8 +98,9 @@ full path stays exercisable.
 - **Message types:** `register`, `register_ack`, `heartbeat`, `job`, `job_chunk`,
   `job_result`, `ping`, `shutdown`.
 - **Encoding:** a discriminated union via Pydantic (`Field(discriminator="type")`).
-- **Important:** `protocol.py` is duplicated in both packages and **must stay in sync**.
-  The body below the file header is byte-identical and is verified in CI.
+- **Shared package:** the wire models live once in `packages/protocol/` and are
+  imported by both the orchestrator and the node — no duplicated protocol files
+  to drift. CI verifies imports resolve on both sides.
 
 ## 6. Database Schema
 
@@ -96,7 +109,11 @@ Main tables (Supabase / PostgreSQL):
 - `users` — accounts, tiers
 - `api_keys` — sha256-hashed API keys for developer auth
 - `nodes` — registered provider nodes and their capabilities
-- `jobs` — inference history
+- `jobs` / `image_jobs` / `video_jobs` — inference history (mock jobs excluded from stats)
+- `intel_scans` — two-tier cache backing the token-intel endpoints (scan_type + target key)
+- `monitors` / `alert_events` / `alert_webhooks` — user monitoring agents, their alerts, and the webhook outbox
+- `auth_challenges` — wallet-signature challenge nonces (survive restarts)
+- `topup_intents`, `withdrawals`, treasury/buyback/burn accounting tables
 
 Migrations live in `orchestrator/migrations/` and are applied in numeric order
 (`001`, `002`, …). Each file is idempotent and safe to re-run.
@@ -115,7 +132,9 @@ Two distinct schemes:
 
 - Format: `orvx_sk_<32-char urlsafe>`.
 - Stored as a sha256 hash; the plaintext is shown once at creation.
-- Sent as `Authorization: Bearer <key>` to `/v1/chat/completions`.
+- Sent as `Authorization: Bearer <key>` to `/v1/chat/completions` and the
+  token-intel endpoints. The read-only scan/status endpoints accept either
+  scheme (`get_current_user_flexible`).
 
 ## 8. Node Selection
 
@@ -126,6 +145,7 @@ def select_node(model, user_tier):
         model in models_supported,
         current_jobs < max_concurrent_jobs,
         last_heartbeat within 60s,
+        not draining,
     )
     if user_tier in ('gold', 'diamond'):
         prefer the least-loaded node (lowest current_jobs)
@@ -134,42 +154,81 @@ def select_node(model, user_tier):
     return candidates.first() or None
 ```
 
-If no node qualifies, the request falls back to a mock response during alpha.
+Selection is VRAM-aware (nodes with more free VRAM are preferred) and honors
+drain mode (a drained node finishes its jobs and takes no new ones). If no node
+qualifies, the request waits briefly for a slot (`capacity_exhausted`) or fails
+fast with `no_chat_provider` / `no_image_provider` — it never falls back to a
+mock response in production.
 
-## 9. Stub Modes (Development)
+## 9. Token Intelligence & Monitoring
+
+The intel layer answers "what is this token / wallet doing" from plain Solana
+JSON-RPC + Jupiter quotes, with no third-party analytics providers.
+
+- **Scans** (`GET /v1/tokens/{ca}`, `/v1/wallets/{wallet}`, accumulation,
+  holders, early-buyers, social, clusters) resolve metadata, supply, USDC
+  price, liquidity (configured pools), holder distribution
+  (`getTokenLargestAccounts` + owner resolution), and social signals
+  (DexScreener, optional X API v2). All lookups are fail-soft: a missing data
+  source yields `null`/`[]`, never an error.
+- **Cache** — results live in `intel_scans` (scan_type + target, TTL
+  `INTEL_SCAN_CACHE_TTL_SECONDS`) with an in-memory front cache; repeat scans
+  skip RPC work across restarts.
+- **AI analysis** (`GET /v1/tokens/{ca}/intelligence`) dispatches the scan to a
+  GPU node (`INTEL_AI_MODEL`) as a normal chat job — real compute demand on the
+  network — and caches the narrative/risk summary. Fail-soft: no node → 503,
+  never a degraded answer.
+- **Monitoring agents** (`/v1/agents/*`) — the monitor worker
+  (`ENABLE_MONITOR_WORKER`) evaluates user-defined conditions on a schedule,
+  writes deduplicated `alert_events`, and delivers webhook alerts with
+  exponential backoff (`alert_webhooks` outbox). Each cycle refreshes holder
+  snapshots for monitored tokens so accumulation scoring stays current.
+
+Plain-RPC constraints that shape this layer: mint addresses do not appear in
+ordinary transfer transactions and plain RPC cannot enumerate a mint's holders,
+so whale analysis is anchored on `TOKEN_WHALE_WATCHLIST_JSON` and cached holder
+snapshots.
+
+## 10. Stub Modes (Development)
 
 Several components support stub modes so the whole system runs without special hardware:
 
 - `ORVIX_NODE_STUB_GPU=true` — fake GPU detection.
-- Mock inference backend (the node default).
+- `ALLOW_MOCK_INFERENCE=true` — orchestrator serves canned replies when no node
+  is connected (off by default; must stay off anywhere real users can reach).
 
 Together these let the full developer → orchestrator → node → response path run end-to-end on
 any machine, no GPU required.
 
-## 10. Future Architecture
+## 11. Future Architecture
 
 Planned but not yet implemented:
 
-- Real vLLM backend (needs a GPU).
 - DAO governance (v2).
 - Frontend (Next.js) — a separate phase.
 - Agent SDK (v3).
+- Redis-backed rate limiting / challenge store (in-memory today — single-worker).
 
-## 11. Testing
+## 12. Testing
 
 - **Unit tests:** `pytest` in each package (hermetic — no live DB or network).
 - **Integration:** a cross-process flow runs the node against the orchestrator under uvicorn.
 - **Coverage:** tracked, not yet enforced (target 80%).
 - **CI:** GitHub Actions on every push and PR (see `.github/workflows/`).
 
-## 12. Operational Notes
+## 13. Operational Notes
 
 - **Process management:** systemd (Linux) or PM2.
 - **Reverse proxy:** Caddy (auto-SSL) or Nginx.
-- **Logs:** stdout in development, structured output via `loguru`.
-- **Monitoring:** Sentry for errors, Grafana for metrics (planned).
+- **Logs:** stdout in development, structured JSON via `loguru` in production;
+  every request carries a `request_id` across all log lines (also returned as
+  `X-Request-ID`). Intel scans and monitor cycles emit their own structured
+  lines.
+- **Monitoring:** Sentry for errors (opt-in via `SENTRY_DSN`, errors tagged
+  with `request_id`/`path`; intel failures tagged with `scan_type`/`target`),
+  Grafana for metrics (planned).
 
-## 13. Decision Records
+## 14. Decision Records
 
 - **Why a monorepo:** simpler dependency management, easy protocol sync, single CI.
 - **Why Python everywhere:** developer productivity, and vLLM is Python-native.
@@ -177,7 +236,7 @@ Planned but not yet implemented:
 - **Why a WebSocket protocol:** persistent, bidirectional job dispatch and streaming with low
   per-message overhead.
 
-## 14. Image Generation & Storage Lifecycle
+## 15. Image Generation & Storage Lifecycle
 
 Image generation reuses the WebSocket job-dispatch model with an added binary
 transfer channel:

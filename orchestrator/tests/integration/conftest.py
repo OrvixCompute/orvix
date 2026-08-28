@@ -57,6 +57,12 @@ def image_env(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(node_manager, "dispatch_image_job", fake_dispatch)
+    monkeypatch.setattr(images_route, "_fetch_image_bytes", fake_fetch)
+
+    async def fake_settle(node, cost):
+        return None
+
+    monkeypatch.setattr(node_manager, "settle_job", fake_settle)
 
     app.dependency_overrides[get_supabase] = lambda: db
     app.dependency_overrides[get_user_from_api_key] = dep

@@ -28,7 +28,7 @@ from typing import Optional
 from supabase import Client
 
 from app.config import settings
-from app.logger import logger
+from app.logger import log_intel_scan, logger
 from app.models.protocol import JobMessage
 from app.services import social_intel, token_intel
 from app.services.node_manager import node_manager
@@ -98,13 +98,16 @@ async def generate_token_intelligence(
     db: Client, mint: str, *, bypass_cache: bool = False
 ) -> Optional[dict]:
     """Analyze a token via a GPU node. Returns analysis dict or None (fail-soft)."""
+    _start = time.perf_counter()
     if not bypass_cache:
         cached = token_intel._cache_get("intelligence", mint)
         if cached is not None:
+            log_intel_scan("intelligence", mint, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
         cached = token_intel._db_cache_get(db, "intelligence", mint)
         if cached is not None:
             token_intel._cache_put("intelligence", mint, cached)
+            log_intel_scan("intelligence", mint, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
 
     # Gather the raw inputs (cached scans; cheap).
@@ -223,6 +226,7 @@ async def generate_token_intelligence(
     token_intel._cache_put("intelligence", mint, payload)
     token_intel._db_cache_put(db, "intelligence", mint, payload)
     logger.info("Intelligence generated for {} (model={}, latency={}ms)", mint, model, payload["latency_ms"])
+    log_intel_scan("intelligence", mint, cache_hit=False, duration_ms=(time.perf_counter() - _start) * 1000)
     return payload
 
 

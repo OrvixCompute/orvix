@@ -145,6 +145,12 @@ have early users discover it the hard way. As of this release:
 - **No on-chain slashing or output verification.** The network does not yet
   cryptographically verify that a node returned honest inference results, and there is
   no slashing/dispute mechanism. Provider trust is currently operational, not enforced.
+  **What exists today:** every served chat/image request carries a signed receipt
+  (`X-Orvix-Receipt` / `X-Orvix-Receipts` header) proving which node/provider served
+  it and what usage was billed. Customers verify the signature offline against the
+  public key at `GET /v1/verify/public-key`, or via `POST /v1/verify/receipt` — see
+  [docs/covenant.md](docs/covenant.md). On-chain enforcement (slashing/disputes) is
+  still on the testnet roadmap.
 - **Staking is disabled for alpha** (`REQUIRE_STAKE_FOR_PROVIDER=false`). It activates
   ahead of the public testnet.
 - **ORVX mint is not yet wired in-app.** The on-chain mint address is added when the

@@ -28,7 +28,7 @@ from solders.pubkey import Pubkey
 from supabase import Client
 
 from app.config import settings
-from app.logger import logger
+from app.logger import log_intel_scan, logger
 from app.services import token_metadata
 from app.services.solana_service import TOKEN_PROGRAM_ID, get_solana_service
 
@@ -168,12 +168,15 @@ async def get_token_price_usdc(mint: str) -> Optional[Decimal]:
 
 async def scan_token(db: Client, ca: str) -> dict:
     """Full token profile for a mint, cached in intel_scans."""
+    _start = time.perf_counter()
     cached = _cache_get("token", ca)
     if cached is not None:
+        log_intel_scan("token", ca, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
         return cached
     cached = _db_cache_get(db, "token", ca)
     if cached is not None:
         _cache_put("token", ca, cached)
+        log_intel_scan("token", ca, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
         return cached
 
     sol = get_solana_service()
@@ -213,6 +216,7 @@ async def scan_token(db: Client, ca: str) -> dict:
     }
     _cache_put("token", ca, payload)
     _db_cache_put(db, "token", ca, payload)
+    log_intel_scan("token", ca, cache_hit=False, duration_ms=(time.perf_counter() - _start) * 1000)
     return payload
 
 
@@ -352,12 +356,15 @@ async def analyze_wallet(db: Client, wallet: str, mint: Optional[str] = None) ->
     so a repeat call avoids Solana RPC work across restarts.
     """
     cache_key = "wallet" + (f":{mint}" if mint else "")
+    _start = time.perf_counter()
     cached = _cache_get("wallet", cache_key)
     if cached is not None:
+        log_intel_scan("wallet", cache_key, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
         return cached
     cached = _db_cache_get(db, "wallet", cache_key)
     if cached is not None:
         _cache_put("wallet", cache_key, cached)
+        log_intel_scan("wallet", cache_key, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
         return cached
 
     sol = get_solana_service()
@@ -376,6 +383,7 @@ async def analyze_wallet(db: Client, wallet: str, mint: Optional[str] = None) ->
     }
     _cache_put("wallet", cache_key, payload)
     _db_cache_put(db, "wallet", cache_key, payload)
+    log_intel_scan("wallet", cache_key, cache_hit=False, duration_ms=(time.perf_counter() - _start) * 1000)
     return payload
 
 
@@ -532,13 +540,16 @@ async def _load_buy_history(sol, wallet: str, mint: str) -> list[dict]:
 
 async def compute_accumulation(db: Client, ca: str, *, bypass_cache: bool = False) -> dict:
     """Accumulation score for a mint, from watchlist wallets + cached snapshot."""
+    _start = time.perf_counter()
     if not bypass_cache:
         cached = _cache_get("accumulation", ca)
         if cached is not None:
+            log_intel_scan("accumulation", ca, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
         cached = _db_cache_get(db, "accumulation", ca)
         if cached is not None:
             _cache_put("accumulation", ca, cached)
+            log_intel_scan("accumulation", ca, cache_hit=True, duration_ms=(time.perf_counter() - _start) * 1000)
             return cached
 
     watchlist = settings.token_whale_watchlist
@@ -586,6 +597,7 @@ async def compute_accumulation(db: Client, ca: str, *, bypass_cache: bool = Fals
     if not bypass_cache:
         _cache_put("accumulation", ca, payload)
         _db_cache_put(db, "accumulation", ca, payload)
+    log_intel_scan("accumulation", ca, cache_hit=False, duration_ms=(time.perf_counter() - _start) * 1000)
     return payload
 
 

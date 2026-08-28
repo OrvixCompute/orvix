@@ -49,6 +49,7 @@ from app.routes import (
     staking,
     tokens,
     user_staking,
+    verify,
     videos,
     wallets,
 )
@@ -125,6 +126,7 @@ app.include_router(staking.router)
 app.include_router(tokens.router)
 app.include_router(wallets.router)
 app.include_router(user_staking.router)
+app.include_router(verify.router)
 app.include_router(account.router)
 app.include_router(admin.router)
 app.include_router(agents.router)

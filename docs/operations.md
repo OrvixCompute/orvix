@@ -2,6 +2,61 @@
 
 Operational runbook notes for running Orvix in production.
 
+## Observability
+
+### Logs
+
+The orchestrator logs to **stdout only** (JSON lines in prod, human-readable in
+dev) via loguru. In production, pipe stdout into your log aggregator
+(journald → Loki/Datadog, etc).
+
+Every HTTP request gets a `request_id` UUID:
+
+- returned to the client as the **`X-Request-ID`** response header,
+- included in the error envelope (`error.request_id`) on 4xx/5xx responses,
+- bound as a loguru contextual field for the whole request, so **every log
+  line emitted while serving it carries `request_id`** in the JSON `extra`
+  object — including service-layer lines that have no request object of their
+  own.
+
+Key structured log lines:
+
+- `request ...` / `request_failed ...` — one line per HTTP request with
+  `method`, `path`, `status`, `duration_ms`, `request_id`.
+- `intel_scan scan_type=... target=... cache_hit=... duration_ms=...` — one
+  line per token-intel scan (token, wallet, accumulation, holders,
+  early_buyers, social, intelligence) showing cache efficiency and latency.
+  `scan_type`/`target` are also attached to the Sentry event when the scan
+  fails (see below).
+- `monitor_cycle monitors_evaluated=... alerts_fired=... webhooks_dispatched=...`
+  — one line per monitor-worker cycle that evaluated at least one monitor.
+- `intel_error scan_type=... target=...` — fail-soft intel failures, logged
+  with the exception and reported to Sentry as a warning tagged with the scan
+  context.
+
+### Sentry
+
+Error tracking is opt-in: set `SENTRY_DSN` (get it from the Sentry project
+settings) and optionally `SENTRY_TRACES_SAMPLE_RATE` (default 0.1). When the
+DSN is empty nothing is initialized and no events are sent.
+
+- **Env config:** `.env.example` documents both variables; `main.py` calls
+  `sentry_sdk.init()` with the FastAPI + Logging integrations, the
+  `ENVIRONMENT` as the environment, and the orchestrator version as the
+  release. `send_default_pii=False` — wallet addresses and request bodies are
+  never shipped.
+- **Request context:** unhandled 5xx errors are captured with `request_id` and
+  `path` tags so an error in the Sentry dashboard can be correlated back to a
+  log line.
+- **Intel context:** fail-soft token-intel failures are captured as
+  **warning-level** events tagged with `scan_type` and `target`, so repeated
+  failures for one mint/wallet are filterable — the signal that a data source
+  is broken for a particular token, not the network at large.
+
+**Verify a deployment** by triggering a known error (e.g. a bad wallet address
+on an endpoint that resolves it through the intel layer) and confirming the
+event shows up in the Sentry dashboard with the `scan_type`/`target` tags.
+
 ## Code Synchronization Discipline
 
 **The repository is the single source of truth for all code.** Anything running

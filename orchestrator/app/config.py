@@ -140,6 +140,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Inference receipts (signed verdicts) -------------------------------
+    # Base64 32-byte Ed25519 seed used to sign per-request receipts
+    # (X-Orvix-Receipt). Empty disables receipt signing; the public key is
+    # served at GET /v1/verify/public-key for offline verification.
+    RECEIPT_SIGNING_KEY: str = Field(
+        "",
+        description=(
+            "Base64 32-byte Ed25519 seed for signing inference receipts. "
+            "Empty disables signing. Generate with: "
+            "python -c \"import base64,os;print(base64.b64encode(os.urandom(32)).decode())\""
+        ),
+    )
+
     # --- Staking / tokenomics (whitepaper alignment) -----------------------
     REQUIRE_STAKE_FOR_PROVIDER: bool = Field(
         False,

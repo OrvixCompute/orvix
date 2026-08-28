@@ -97,6 +97,10 @@ class MonitorService:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        # Per-cycle counters for the monitor_cycle log line: alerts emitted and
+        # webhook deliveries attempted during this evaluation cycle.
+        self._cycle_alerts: list[str] = []
+        self._cycle_webhooks: list[str] = []
 
     # --- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
@@ -184,9 +188,11 @@ class MonitorService:
             .limit(settings.MONITOR_MAX_PER_CYCLE)
             .execute()
         )
+        evaluated = 0
         for monitor in res.data or []:
             if not _is_due(monitor):
                 continue
+            evaluated += 1
             try:
                 await self._evaluate_monitor(db, monitor)
             except Exception as exc:  # noqa: BLE001 — one bad monitor is not fatal
@@ -202,6 +208,15 @@ class MonitorService:
                     ).eq("id", monitor["id"]).execute()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Could not update last_checked_at for {}: {}", monitor.get("id"), exc)
+        if evaluated:
+            logger.info(
+                "monitor_cycle monitors_evaluated={} alerts_fired={} webhooks_dispatched={}",
+                evaluated,
+                len(self._cycle_alerts),
+                len(self._cycle_webhooks),
+            )
+        self._cycle_alerts.clear()
+        self._cycle_webhooks.clear()
 
     async def _evaluate_monitor(self, db: Client, monitor: dict) -> None:
         target_type = monitor.get("target_type")
@@ -442,6 +457,7 @@ class MonitorService:
         }
         inserted = db.table("alert_events").insert(row).execute().data[0]
         logger.info("Alert emitted for monitor {} ({}): {}", monitor_id, condition_type, message)
+        self._cycle_alerts.append(str(inserted["id"]))
 
         webhook_url = monitor.get("webhook_url")
         if not webhook_url:
@@ -482,6 +498,7 @@ class MonitorService:
             next_retry = _parse_ts(row.get("next_retry_at"))
             if next_retry is not None and next_retry > _utc_now():
                 continue
+            self._cycle_webhooks.append(str(row.get("id")))
             try:
                 await self._deliver_webhook(db, row)
             except Exception as exc:  # noqa: BLE001 — one delivery is not fatal

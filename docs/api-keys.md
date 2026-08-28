@@ -91,6 +91,12 @@ after 24 hours.
 Responses include an `X-Orvix-Node` header naming the GPU node that served the
 request — useful when you are reporting a bad result.
 
+When receipt signing is enabled, chat responses also carry an
+`X-Orvix-Receipt` header (and image responses `X-Orvix-Receipts`): a signed
+proof of which node/provider served the request and what token usage was
+billed. Verify it at `POST /v1/verify/receipt` or offline against
+`GET /v1/verify/public-key` — see [covenant.md](./covenant.md).
+
 ## 3. Or point an OpenAI client at it
 
 The API is OpenAI-compatible, so existing clients work by changing two settings.

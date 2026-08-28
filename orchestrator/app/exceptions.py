@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.logger import logger
 
 
-def _report_to_sentry(request: Request, exc: Exception) -> None:
+def _report_to_sentry(request: Request, exc: Exception, *, tags: dict | None = None) -> None:
     """Send an unexpected/server error to Sentry with request context.
 
     A no-op when Sentry is not initialized (empty SENTRY_DSN). Client errors
@@ -19,6 +19,27 @@ def _report_to_sentry(request: Request, exc: Exception) -> None:
     with sentry_sdk.new_scope() as scope:
         scope.set_tag("request_id", getattr(request.state, "request_id", None))
         scope.set_tag("path", request.url.path)
+        if tags:
+            for key, value in tags.items():
+                scope.set_tag(key, value)
+        sentry_sdk.capture_exception(exc)
+
+
+def capture_intel_error(scan_type: str, target: str, exc: Exception) -> None:
+    """Report a token-intel failure to Sentry, tagged with the scan context.
+
+    Intel lookups are fail-soft: they log a warning and degrade rather than
+    fail the request. Tagging the Sentry event with the scan type and target
+    makes repeated failures for one mint/wallet filterable — the signal that
+    a data source is broken for a particular token, not the network at large.
+    """
+    logger.opt(exception=exc).warning(
+        "intel_error scan_type={} target={}: {}", scan_type, target, exc
+    )
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("scan_type", scan_type)
+        scope.set_tag("target", target)
+        scope.level = "warning"
         sentry_sdk.capture_exception(exc)
 
 

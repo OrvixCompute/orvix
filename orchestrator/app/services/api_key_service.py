@@ -9,6 +9,7 @@ from app.exceptions import NotFoundError, ValidationError
 from app.logger import logger
 
 KEY_PREFIX = "orvx_sk_"
+ALPHA_KEY_PREFIX = "orvx_alpha_"
 MAX_ACTIVE_KEYS = 10
 DISPLAY_PREFIX_LEN = 12  # e.g. "orvx_sk_abcd"
 
@@ -16,6 +17,17 @@ DISPLAY_PREFIX_LEN = 12  # e.g. "orvx_sk_abcd"
 def generate_key() -> str:
     """Generate a new plaintext API key: orvx_sk_<32-char urlsafe>."""
     return f"{KEY_PREFIX}{secrets.token_urlsafe(32)[:32]}"
+
+
+def generate_alpha_key() -> str:
+    """Generate an alpha-partner key: orvx_alpha_<32-char urlsafe>.
+
+    Alpha keys are how partner teams (e.g. OpenCovenant) get a stable credential
+    to run against the hosted orchestrator. They behave exactly like regular
+    keys for auth; the distinct prefix is what lets us recognize and manage
+    them (and give them a separate quota/tier) later.
+    """
+    return f"{ALPHA_KEY_PREFIX}{secrets.token_urlsafe(32)[:32]}"
 
 
 def hash_key(key: str) -> str:
@@ -37,7 +49,7 @@ class ApiKeyService:
         )
         return res.count or 0
 
-    def create(self, user_id: str, name: str) -> dict:
+    def create(self, user_id: str, name: str, *, alpha: bool = False) -> dict:
         """Create a key, enforcing the per-user active limit. Returns plaintext once."""
         if self._active_count(user_id) >= MAX_ACTIVE_KEYS:
             raise ValidationError(
@@ -45,13 +57,14 @@ class ApiKeyService:
                 "Delete one before creating another."
             )
 
-        plaintext = generate_key()
+        plaintext = generate_alpha_key() if alpha else generate_key()
         row = {
             "user_id": user_id,
             "key_hash": hash_key(plaintext),
             "key_prefix": plaintext[:DISPLAY_PREFIX_LEN],
             "name": name,
             "is_active": True,
+            "kind": "alpha" if alpha else "standard",
         }
         res = self.db.table("api_keys").insert(row).execute()
         created = res.data[0]
@@ -61,6 +74,7 @@ class ApiKeyService:
             "key": plaintext,
             "prefix": created["key_prefix"],
             "name": created["name"],
+            "kind": created.get("kind", "standard"),
             "created_at": created["created_at"],
         }
 
@@ -68,7 +82,7 @@ class ApiKeyService:
         """Return all of a user's keys, newest first. Never exposes the hash."""
         res = (
             self.db.table("api_keys")
-            .select("id, key_prefix, name, is_active, last_used_at, created_at")
+            .select("id, key_prefix, name, is_active, last_used_at, created_at, kind")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .execute()

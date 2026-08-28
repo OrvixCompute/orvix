@@ -9,18 +9,20 @@ All endpoints are served under the `/v1` prefix. There are two kinds of
 authentication:
 
 - **JWT** — obtained by signing a wallet challenge. Used for account-level
-  actions: API keys, billing, provider management, and account status
-  (`/v1/account/tier`, `/v1/account/quota`).
+  actions: API keys, billing, provider management, monitoring agents, and
+  account status (`/v1/account/tier`, `/v1/account/quota`).
 - **API key** — a `orvx_sk_...` bearer token. Used for inference requests
-  (`/v1/chat/completions`, `/v1/images/generations`).
+  (`/v1/chat/completions`, `/v1/images/generations`) and, like a JWT, for the
+  token-intel endpoints (`/v1/tokens/*`, `/v1/wallets/*`).
 
 > **Which scheme for which endpoint.** Most account/dashboard endpoints
-> authenticate with a **JWT** (`get_current_user`); inference endpoints use an
-> **API key** (`get_user_from_api_key`). Sending an `orvx_sk_` key to a JWT-only
+> authenticate with a **JWT** (`get_current_user`); inference and token-intel
+> endpoints accept an **API key** (`get_user_from_api_key` /
+> `get_current_user_flexible`). Sending an `orvx_sk_` key to a JWT-only
 > endpoint returns `401 "Not enough segments"` — the key is not a JWT.
-> **Exception:** the read-only status endpoints `/v1/account/tier` and
-> `/v1/account/quota` accept **either** a JWT or an API key, so programmatic
-> clients can check their own tier/quota before dispatching requests.
+> **Exception:** the read-only status endpoints `/v1/account/tier`,
+> `/v1/account/quota`, and the token/wallet scan endpoints accept **either** a
+> JWT or an API key.
 
 ---
 
@@ -368,11 +370,38 @@ listed in `TOKEN_POOLS_JSON`), cached holder snapshot, and a risk summary.
 per-minute rate limit (the `intel` bucket) because they spend external
 RPC/Jupiter budget.
 
+```json
+{
+  "mint": "...",
+  "metadata": { "name": "...", "symbol": "...", "uri": "...", "decimals": 9 },
+  "supply": { "amount": "1000000000000", "decimals": 9, "uiAmountString": "1000.0" },
+  "price_usdc": 0.0123,
+  "liquidity": { "estimated_usdc": 45000.0, "pool_count": 2 },
+  "holders": { "total_holders": 18, "top_holders": [{ "wallet": "...", "token_account": "...", "balance": 123.0 }], "top10_share": 0.62, "as_of": "2026-08-20T00:00:00Z" },
+  "risk": { "warnings": ["No on-chain token metadata — the mint may be unaudited or unverified"] },
+  "scanned_at": "2026-08-20T00:00:00Z"
+}
+```
+
 ### `GET /v1/tokens/{ca}/accumulation`
 Accumulation score (0–100) + metrics for a mint over a 7-day window: net inflow
 across watchlist wallets, distinct buy transfers, top-10 holder concentration,
 and per-component scores. **Auth: JWT or API key.** Rate-limited like the scan
 endpoint.
+
+```json
+{
+  "mint": "...",
+  "score": 71,
+  "label": "strong",
+  "metrics": {
+    "watchlist_wallets": 3, "inflow_7d": 12000.0, "inflow_ratio": 0.012,
+    "buy_tx_7d": 14, "top10_share": 0.62,
+    "inflow_score": 60.0, "activity_score": 70.0, "distribution_score": 76.0
+  },
+  "computed_at": "2026-08-20T00:00:00Z"
+}
+```
 
 ### `GET /v1/tokens/{ca}/holders`
 Real top-holder distribution for a mint, resolved to owner wallets via
@@ -385,6 +414,13 @@ Falls back to the watchlist snapshot when RPC cannot resolve accounts.
 First-buy evidence for the current top holders — for each, the earliest
 detected incoming transfer of the mint is found by paging its wallet history.
 Sorted oldest-buy first. **Auth: JWT or API key.** Rate-limited.
+
+```json
+[
+  { "wallet": "...", "amount": 250.0, "signature": "...", "block_time": 1750000000 },
+  { "wallet": "...", "amount": 90.5, "signature": "...", "block_time": 1750000100 }
+]
+```
 
 ### `GET /v1/tokens/{ca}/social`
 Social media analysis for a token: DexScreener data (social links, 24h volume,
@@ -443,10 +479,38 @@ recorded (`is_mock=false`) so network stats reflect the real compute served.
 **Auth: JWT or API key.** Returns `503 no_chat_provider` when no node serves
 the model, `503 capacity_exhausted` when all are busy.
 
+```json
+{
+  "mint": "...",
+  "model": "qwen-2.5-7b",
+  "analysis": {
+    "narrative": "...", "risk_flags": ["..."], "watch_next": "...",
+    "verdict": "hold", "reasons": ["...", "..."],
+    "holder_count": 18, "top10_share": 0.62, "risk_score": 45
+  },
+  "generated_at": "2026-08-20T00:00:00Z",
+  "latency_ms": 4321,
+  "node_id": "..."
+}
+```
+
 ### `GET /v1/wallets/{wallet}?mint=<ca>`
 Wallet analysis: token holdings (capped at `MAX_TOKEN_ACCOUNTS_PER_WALLET`),
 recent activity (capped at `MAX_WALLET_TX_PARSE` parsed txs), and — when
 `mint` is given — buy/inflow history for that mint. **Auth: JWT or API key.**
+
+```json
+{
+  "wallet": "...",
+  "holdings": [{ "mint": "...", "ui_amount": 12.5, "symbol": "ORVX", "name": "Orvix" }],
+  "recent_activity": [
+    { "signature": "...", "slot": 320000000, "timestamp": 1750000000,
+      "memo": null, "transfers": [{ "mint": "...", "ui_amount": 1.0, "source": "...", "destination": "..." }] }
+  ],
+  "buy_history": [{ "signature": "...", "amount": 100.0, "timestamp": 1750000000, "counterparty": "..." }],
+  "analyzed_at": "2026-08-20T00:00:00Z"
+}
+```
 
 ### `POST /v1/agents/monitors`
 Create a monitoring agent. **Auth: JWT.**
@@ -461,6 +525,28 @@ A `price_drop_pct` monitor snapshots the current price as its baseline at
 creation. Evaluation runs in the background worker (`ENABLE_MONITOR_WORKER`).
 Alerts are deduplicated per day (score/price conditions) or per on-chain
 signature (transfer/activity conditions).
+
+```json
+{
+  "id": "...", "name": "my-monitor", "target_type": "token",
+  "target_address": "...",
+  "conditions": [{ "type": "accumulation_score", "gte": 70 }],
+  "webhook_url": "https://example.com/hook", "is_active": true,
+  "interval_minutes": 30, "baseline_price_usdc": null,
+  "last_checked_at": "2026-08-20T00:00:00Z", "created_at": "2026-08-20T00:00:00Z"
+}
+```
+
+Alert event shape (`GET /v1/agents/alerts`, `GET /v1/agents/monitors/{id}/alerts`):
+
+```json
+{
+  "id": "...", "monitor_id": "...", "condition_type": "accumulation_score",
+  "message": "Accumulation score 85 ... (threshold 70)",
+  "payload": { "score": 85, "label": "strong" },
+  "occurred_at": "2026-08-20T00:00:00Z"
+}
+```
 
 ### `GET /v1/agents/monitors`
 List the current user's monitors, newest first. **Auth: JWT.**
@@ -498,6 +584,28 @@ with exponential backoff (`WEBHOOK_RETRY_BASE_SECONDS`, capped at
 carries an `X-Orvix-Signature` header — the hex HMAC-SHA256 of the raw JSON
 body, sorted keys, compact separators — so receivers can authenticate the
 sender.
+
+### `POST /v1/admin/intel/holder-snapshot?mint=<ca>`
+Manually refresh the holder snapshot for a mint from
+`TOKEN_WHALE_WATCHLIST_JSON` balances (ranked top holders + `top10_share`),
+merging it into the cached token scan so accumulation scoring picks it up
+immediately. **Auth: `X-Admin-Key`.** Returns the snapshot
+(`{ total_holders, top_holders: [{wallet, balance}], top10_share, as_of }`).
+`400 invalid_request` when the watchlist is empty or the mint is invalid.
+
+```bash
+curl -X POST "https://orvix.network/v1/admin/intel/holder-snapshot?mint=<ca>" \
+  -H "X-Admin-Key: <ADMIN_API_KEY>"
+```
+
+```json
+{
+  "total_holders": 5,
+  "top_holders": [{ "wallet": "...", "balance": 123.0 }],
+  "top10_share": 0.42,
+  "as_of": "2026-08-20T00:00:00Z"
+}
+```
 
 ---
 

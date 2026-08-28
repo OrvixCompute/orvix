@@ -27,6 +27,7 @@ from app.logger import logger
 from app.models.inference import ChatCompletionRequest
 from app.models.protocol import JobMessage
 from app.services import inference_service, quota_service, rate_limit_service, tier_service
+from app.services import receipt_signer
 from app.services.billing_service import BillingService
 from app.services.holder import holder_service
 from app.services.node_manager import (
@@ -253,10 +254,22 @@ async def _serve_node(db, billing, user, api_key, node, body, prompt_tokens, tie
 
     payload = result.result or {}
     payload.setdefault("created", int(time.time()))
-    return JSONResponse(
-        content=payload,
-        headers={"X-Orvix-Tier": tier, "X-Orvix-Cost": str(cost), "X-Orvix-Node": node.node_id},
+    headers = {
+        "X-Orvix-Tier": tier,
+        "X-Orvix-Cost": str(cost),
+        "X-Orvix-Node": node.node_id,
+    }
+    receipt = receipt_signer.build_receipt(
+        request_id=job.job_id,
+        node_id=node.node_id,
+        provider_id=node.provider_id,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        model=body.model,
     )
+    if receipt:
+        headers["X-Orvix-Receipt"] = json.dumps(receipt)
+    return JSONResponse(content=payload, headers=headers)
 
 
 async def _serve_node_streaming(
@@ -305,6 +318,16 @@ async def _serve_node_streaming(
                 cost=cost,
                 latency_ms=latency_ms,
             )
+            receipt = receipt_signer.build_receipt(
+                request_id=job.job_id,
+                node_id=node.node_id,
+                provider_id=node.provider_id,
+                prompt_tokens=final_prompt_tokens,
+                completion_tokens=completion_tokens,
+                model=body.model,
+            )
+            if receipt:
+                yield f"data: {json.dumps({'receipt': receipt})}\n\n"
         except Exception as exc:  # noqa: BLE001 — stream already delivered
             logger.error("Post-stream billing failed: {}", exc)
 

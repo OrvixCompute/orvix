@@ -5,14 +5,20 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.logger import logger
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Assign each request a UUID, time it, and log a one-line summary."""
+    """Assign each request a UUID, time it, and log a one-line summary.
+
+    The request_id is bound as a loguru contextual value for the duration of
+    the request, so every log line emitted while serving it (services, jobs,
+    intel scans) carries the same request_id — including worker-internal
+    service logs, which have no request object of their own.
+    """
 
     async def dispatch(self, request: Request, call_next):
         request_id = str(uuid.uuid4())
@@ -20,7 +26,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         start = time.perf_counter()
         try:
-            response = await call_next(request)
+            with logger.contextualize(request_id=request_id):
+                response = await call_next(request)
         except Exception:
             # Let exception handlers produce the body; still record timing.
             duration_ms = (time.perf_counter() - start) * 1000

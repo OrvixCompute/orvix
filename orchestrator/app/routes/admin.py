@@ -18,6 +18,7 @@ from app.models.admin import (
 )
 from app.services import storage_service
 from app.services import treasury_health as treasury_health_service
+from app.services.api_key_service import ApiKeyService
 from app.services.burn_service import BurnService
 from app.services.buyback_service import BuybackService
 from app.services.covenant_service import get_covenant_service
@@ -57,6 +58,7 @@ async def feature_flags():
         "covenant_enable_attestation": settings.COVENANT_ENABLE_ATTESTATION,
         "covenant_min_reputation": settings.COVENANT_MIN_REPUTATION,
         "covenant_wallet_configured": bool(settings.COVENANT_PROVIDER_WALLET_ADDRESS),
+        "receipt_signing_enabled": bool(settings.RECEIPT_SIGNING_KEY),
         "enable_monitor_worker": settings.ENABLE_MONITOR_WORKER,
         "intel_scan_cache_ttl_seconds": settings.INTEL_SCAN_CACHE_TTL_SECONDS,
         "intel_holder_snapshot_ttl_seconds": settings.INTEL_HOLDER_SNAPSHOT_TTL_SECONDS,
@@ -175,6 +177,26 @@ async def covenant_reputation(wallet: str = ""):
         "volume_micro_usdc": rep.volume_micro_usdc,
         "source_fee_payer": rep.source_fee_payer,
     }
+
+
+@router.post("/alpha/keys")
+async def issue_alpha_key(body: dict, db: Client = Depends(get_supabase)):
+    """Issue an alpha-partner API key for a user (admin-only).
+
+    Body: ``{"user_id": "<uuid>", "name": "opencovenant"}``. Creates a regular
+    API key row with an ``orvx_alpha_`` prefix (kind=alpha) so partner teams
+    like OpenCovenant can run against the hosted orchestrator, and we can
+    recognize and manage those keys separately. Returns the plaintext key once.
+    """
+    user_id = str(body.get("user_id") or "")
+    name = str(body.get("name") or "alpha")
+    if not user_id:
+        return {"ok": False, "error": "user_id is required"}
+    res = db.table("users").select("id").eq("id", user_id).limit(1).execute()
+    if not res.data:
+        return {"ok": False, "error": "user not found"}
+    created = ApiKeyService(db).create(user_id, name, alpha=True)
+    return {"ok": True, "id": created["id"], "key": created["key"], "prefix": created["prefix"], "kind": created["kind"]}
 
 
 @router.post("/intel/holder-snapshot")

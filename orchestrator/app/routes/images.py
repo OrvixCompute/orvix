@@ -17,6 +17,7 @@ Deploy note — nginx must serve IMAGE_STORAGE_DIR at PUBLIC_IMAGE_URL_BASE. Add
 from __future__ import annotations
 
 import base64
+import json
 import os
 import secrets
 import time
@@ -41,6 +42,7 @@ from app.services import (
     image_pricing,
     quota_service,
     rate_limit_service,
+    receipt_signer,
     storage_service,
     tier_service,
 )
@@ -191,6 +193,7 @@ async def images_generations(
     created = int(time.time())
     data: list[dict] = []
     produced = 0
+    receipts: list[dict] = []
     try:
         for _ in range(body.n):
             job_id = str(uuid.uuid4())
@@ -252,6 +255,16 @@ async def images_generations(
                 height=height,
                 image_url=public_url,
             )
+            receipt = receipt_signer.build_receipt(
+                request_id=job_id,
+                node_id=node.node_id,
+                provider_id=node.provider_id,
+                prompt_tokens=0,
+                completion_tokens=0,
+                model=body.model,
+            )
+            if receipt:
+                receipts.append(receipt)
             produced += 1
 
             if body.response_format == "b64_json":
@@ -268,13 +281,13 @@ async def images_generations(
             quota_service.refund_image_quota(db, user["wallet_address"], unproduced)
         raise
 
-    return JSONResponse(
-        content={"created": created, "data": data},
-        headers={
-            "X-Orvix-Quota-Remaining": str(quota["remaining"]),
-            "X-Orvix-Quota-Reset": quota["reset_at"],
-        },
-    )
+    headers = {
+        "X-Orvix-Quota-Remaining": str(quota["remaining"]),
+        "X-Orvix-Quota-Reset": quota["reset_at"],
+    }
+    if receipts:
+        headers["X-Orvix-Receipts"] = json.dumps(receipts)
+    return JSONResponse(content={"created": created, "data": data}, headers=headers)
 
 
 def _record_image_job(
